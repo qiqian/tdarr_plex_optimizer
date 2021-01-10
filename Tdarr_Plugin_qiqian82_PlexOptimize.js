@@ -56,6 +56,21 @@ function getTrackBitrate(track)
     return "?";
   return Number(bitrate) / 1000;
 }
+function calTotalBitrate(file)
+{
+  // Check if duration info is filled, if so times it by 0.0166667 to get time in minutes.
+  // If not filled then get duration of stream 0 and do the same.
+  let duration = '';
+  if (typeof file.meta.Duration !== 'undefined') {
+    duration = file.meta.Duration * 0.0166667;
+  } else {
+    duration = file.ffProbeData.streams[0].duration * 0.0166667;
+  }
+  // Work out currentBitrate using "Bitrate = file size / (number of minutes * .0075)"
+  // Used from here https://blog.frame.io/2017/03/06/calculate-video-bitrates/
+  // eslint-disable-next-line no-bitwise
+  return ~~(file.file_size / (duration * 0.0075));
+}
 
 function findTitle(stream, track)
 {
@@ -98,15 +113,16 @@ function fillLangAlias_set(langList, aliasSet)
   }
 }
 
+const zhAlias = ['zh', 'chi', 'chn', 'cn', 'zho'];
+const enAlias = ['en', 'eng'];
+const jpAlias = ['jp', 'ja', 'jpn', 'jp'];
+const krAlias = ['kor', 'kr'];
+const frAlias = ['fr', 'fre', 'fra', 'fro', 'frm'];
+const geAlias = ['gem', 'ger', 'deu', 'de', 'gmh', 'goh'];
+const spaAlias = ['spa', 'es'];
+
 function fillLangAlias(langList)
-{
-  const zhAlias = ['zh', 'chi', 'chn', 'cn', 'zho'];
-  const enAlias = ['en', 'eng'];
-  const jpAlias = ['jp', 'ja', 'jpn', 'jp'];
-  const krAlias = ['kor', 'kr'];
-  const frAlias = ['fr', 'fre', 'fra', 'fro', 'frm'];
-  const geAlias = ['gem', 'ger', 'deu', 'de', 'gmh', 'goh'];
-  const spaAlias = ['spa', 'es'];
+{  
   fillLangAlias_set(langList, zhAlias);
   fillLangAlias_set(langList, enAlias);
   fillLangAlias_set(langList, jpAlias);
@@ -120,12 +136,14 @@ function infoVideo(file, stream, action)
 {
   let track = findTrack(file, stream);
   let bitrate = getTrackBitrate(track);
+  if (bitrate === '?')
+    bitrate = calTotalBitrate(file) + "?";
   let title = findTitle(stream, track);
   let bitDepth = "8-bit";
   if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10')
      bitDepth = "10-bit";
-  return `Video ${stream.index}, ${title}, ${stream.codec_name} `
-  + `${track.Width}x${track.Height} ${bitrate}k ${bitDepth} : ${action} \n`;
+  return `Video[${stream.index}], ${title}, ${stream.codec_name} `
+  + `${track.Width}x${track.Height} ${bitrate}k ${bitDepth} -> ${action} \n`;
 }
 
 function infoAudio(file, stream, action)
@@ -134,8 +152,8 @@ function infoAudio(file, stream, action)
   let bitrate = getTrackBitrate(track);
   let title = findTitle(stream, track);
   let lang = getLang(stream, track);
-  return `Audio ${stream.index}, ${title}, ${lang}, ${stream.codec_name} `
-  + `[${track.ChannelLayout}] ${bitrate}k : ${action} \n`; 
+  return `Audio[${stream.index}], ${title}, ${lang}, ${stream.codec_name} `
+  + `[${track.ChannelLayout}] ${bitrate}k -> ${action} \n`; 
 }
 
 function matchListAny(name, listAny)
@@ -217,8 +235,10 @@ function plugin(file, librarySettings, inputs) {
   let extraArguments = '';
   let needModifyVideo = false;
   let needModifyAudio = false;
+  let needModifySubtitle = false;
   let maxFrameBitrate = 0;
   let noAudioCopied = true;
+  let outputStreamIndex = 0;
   // Go through each stream in the file.
   for (let i = 0; i < file.ffProbeData.streams.length; i++) {
     let stream = file.ffProbeData.streams[i];
@@ -230,37 +250,49 @@ function plugin(file, librarySettings, inputs) {
       // Check if codec of stream is mjpeg/png, if so then remove this "video" stream.
       // mjpeg/png are usually embedded pictures that can cause havoc with plugins.
       if (stream.codec_name === 'mjpeg' || stream.codec_name === 'png') {
-        extraArguments += ` -map 0:${stream.index} -c:${stream.index} copy`;
-        response.infoLog += infoVideo(file, stream, 'copy');
+        extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
+        response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] copy`);
+        outputStreamIndex++;
         continue;
       }
       // Check if codec of stream is hevc or vp9 AND check if file.container matches inputs.container.
       // If so nothing for plugin to do.
       if (stream.codec_name === 'hevc' || stream.codec_name === 'vp9') {
-        extraArguments += ` -map 0:${stream.index} -c:${stream.index} copy`;
-        response.infoLog += infoVideo(file, stream, 'copy');
+        extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
+        response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] copy`);
+        outputStreamIndex++;
         continue;
       }
-
-      // check bitrate
-      let currentBitrate = getTrackBitrate(track);
 
       // bitrate calculator
       let targetBitrate = 1500; // 480p
       if (track.Width > 640)
-        targetBitrate = 3000; // sd
+        targetBitrate = 3200; // sd
       if (track.Width > 1280)
         targetBitrate = 7200; // 1k
       if (track.Width > 1920)
         targetBitrate = 18000; // 2k
       if (track.Width > 2560)
-        targetBitrate = 28000; // 4k
+        targetBitrate = 28780; // 4k
       if (track.Width > 3840)
-        targetBitrate = 56000; // 8k
+        targetBitrate = 115139; // 8k
+
+      // check bitrate
+      let currentBitrate = getTrackBitrate(track);
+      if (currentBitrate === '?') {
+        currentBitrate = calTotalBitrate(file);
+      }
+      // Check if video stream is HDR or 10bit
+      let bitDepth = "8-bit";
+      if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10') {
+        bitDepth = "10-bit";
+        targetBitrate *= 1.25;
+      }
 
       if (targetBitrate >= currentBitrate) {
-        extraArguments += ` -map 0:${stream.index} -c:${stream.index} copy`;
-        response.infoLog += infoVideo(file, stream, 'copy');
+        extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
+        response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] copy`);
+        outputStreamIndex++;
         continue;
       }
       else {
@@ -272,18 +304,16 @@ function plugin(file, librarySettings, inputs) {
           maxBitrate = parseInt(currentBitrate);
         maxFrameBitrate += maxBitrate;
 
-        extraArguments += ` -map 0:${stream.index} -c:${stream.index} libx265 `
+        extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} libx265 `
         + `-b:${stream.index} ${targetBitrate}k `
         + `-minrate:${stream.index} ${minBitrate}k `
         + `-maxrate:${stream.index} ${maxBitrate}k `;
-        // Check if video stream is HDR or 10bit
-        let bitDepth = "8-bit";
-        if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10') {
+        if (bitDepth === "10-bit") {
           extraArguments += " -pix_fmt yuv420p10le";
-          bitDepth = "10-bit";
         }
         response.infoLog += infoVideo(file, stream, 
-          `-> x265 ${targetBitrate}k ${bitDepth}`);
+          `[${outputStreamIndex}] x265 ${targetBitrate}k ${bitDepth}`);
+        outputStreamIndex++;
       }
     }
 
@@ -315,14 +345,30 @@ function plugin(file, librarySettings, inputs) {
       }
       else {
         noAudioCopied = false;
-        extraArguments += ` -map 0:${stream.index} -c:${stream.index} copy`;
-        response.infoLog += infoAudio(file, stream, 'copy');
+        extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
+        response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] copy`);
+        outputStreamIndex++;
+      }
+    }
+
+    else if (stream.codec_type.toLowerCase() === 'subtitle') {
+      let lang = getLang(stream, track).toLowerCase();
+      if (zhAlias.indexOf(lang) < 0 && enAlias.indexOf(lang) < 0 && lang !== 'und') {
+        // remove  
+        needModifySubtitle = true;
+        response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> removed \n`;
+      }
+      else {
+        extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
+        response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> [${outputStreamIndex}] copy\n`;
+        outputStreamIndex++;
       }
     }
 
     else {
-      extraArguments += ` -map 0:${stream.index} -c:${stream.index} copy`;
-      response.infoLog += `Stream ${stream.index}, ${title}, ${stream.codec_name} : copy \n`;
+      extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
+      response.infoLog += `Stream[${stream.index}], ${title}, ${stream.codec_name} -> [${outputStreamIndex}] copy\n`;
+      outputStreamIndex++;
     }
   }
 
@@ -333,7 +379,7 @@ function plugin(file, librarySettings, inputs) {
     response.infoLog += `Audio rule failed, keep all audio\n`;
   }
 
-  if (!needModifyVideo && !needModifyAudio) {
+  if (!needModifyVideo && !needModifyAudio && !needModifySubtitle) {
     response.processFile = false;
     response.infoLog += `File doesn't need optimize \n`;
     return response;
