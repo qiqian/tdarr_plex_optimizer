@@ -49,14 +49,17 @@ function findTrack(file, stream)
 
 function getTrackBitrate(track)
 {
-  let bitrate = track.BitRate;
-  if (bitrate === undefined)
-    bitrate = track.BitRate_Nominal;
+  let bitrate = undefined;
+  if (track !== undefined) {
+    bitrate = track.BitRate;
+    if (bitrate === undefined)
+      bitrate = track.BitRate_Nominal;  
+  }
   if (bitrate === undefined)
     return "?";
   return Number(bitrate) / 1000;
 }
-function calTotalBitrate(file)
+function calTotalBitrate(file, track)
 {
   // Check if duration info is filled, if so times it by 0.0166667 to get time in minutes.
   // If not filled then get duration of stream 0 and do the same.
@@ -69,7 +72,11 @@ function calTotalBitrate(file)
   // Work out currentBitrate using "Bitrate = file size / (number of minutes * .0075)"
   // Used from here https://blog.frame.io/2017/03/06/calculate-video-bitrates/
   // eslint-disable-next-line no-bitwise
-  return ~~(file.file_size / (duration * 0.0075));
+  let streamSize = file.file_size;
+  if (track !== undefined && track.StreamSize !== undefined) {
+    streamSize = Number(track.StreamSize)
+  }
+  return ~~(streamSize / (duration * 0.0075));
 }
 
 function findTitle(stream, track)
@@ -79,8 +86,8 @@ function findTitle(stream, track)
     title = track.Title;
   if (title === undefined && stream.tags !== undefined)
     title = stream.tags.title;
-  if (title === undefined)
-    title = "noname";
+  // if (title === undefined)
+  //   title = "noname";
   return title;
 }
 
@@ -115,7 +122,7 @@ function fillLangAlias_set(langList, aliasSet)
 
 const zhAlias = ['zh', 'chi', 'chn', 'cn', 'zho'];
 const enAlias = ['en', 'eng'];
-const jpAlias = ['jp', 'ja', 'jpn', 'jp'];
+const jpAlias = ['ja', 'jpn', 'jp', 'jap'];
 const krAlias = ['kor', 'kr'];
 const frAlias = ['fr', 'fre', 'fra', 'fro', 'frm'];
 const geAlias = ['gem', 'ger', 'deu', 'de', 'gmh', 'goh'];
@@ -132,20 +139,36 @@ function fillLangAlias(langList)
   fillLangAlias_set(langList, spaAlias);
 }
 
-function infoVideo(file, stream, action)
+function normalizeLang(lang)
+{  
+  if (zhAlias.indexOf(lang) >= 0)
+    return zhAlias[0];
+  if (enAlias.indexOf(lang) >= 0)
+    return enAlias[0];
+  if (jpAlias.indexOf(lang) >= 0)
+    return jpAlias[0];
+  if (krAlias.indexOf(lang) >= 0)
+    return krAlias[0];
+  if (frAlias.indexOf(lang) >= 0)
+    return frAlias[0];
+  if (geAlias.indexOf(lang) >= 0)
+    return geAlias[0];
+  if (spaAlias.indexOf(lang) >= 0)
+    return spaAlias[0];
+  return lang;
+}
+function cacheAudio(file, stream, audioMap)
 {
   let track = findTrack(file, stream);
-  let bitrate = getTrackBitrate(track);
-  if (bitrate === '?')
-    bitrate = calTotalBitrate(file) + "?";
-  let title = findTitle(stream, track);
-  let bitDepth = "8-bit";
-  if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10')
-     bitDepth = "10-bit";
-  return `Video[${stream.index}], ${title}, ${stream.codec_name} `
-  + `${track.Width}x${track.Height} ${bitrate}k ${bitDepth} -> ${action} \n`;
+  let lang = normalizeLang(getLang(stream, track));  
+  // init map
+  if (audioMap[lang] === undefined)
+    audioMap[lang] = [];
+  // if (audioMap[lang][stream.codec_name] == undefined)
+    // audioMap[lang][stream.codec_name] = [];
+  // record
+  audioMap[lang].push(stream);
 }
-
 function infoAudio(file, stream, action)
 {
   let track = findTrack(file, stream);
@@ -189,6 +212,20 @@ function cleanupArray(listAny)
     if (e === '')
       listAny.splice(i, 1);
   }
+}
+
+function infoVideo(file, stream, action)
+{
+  let track = findTrack(file, stream);
+  let bitrate = getTrackBitrate(track);
+  if (bitrate === '?')
+    bitrate = calTotalBitrate(file, track) + "?";
+  let title = findTitle(stream, track);
+  let bitDepth = "8-bit";
+  if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10')
+     bitDepth = "10-bit";
+  return `Video[${stream.index}], ${title}, ${stream.codec_name} `
+  + `${stream.width}x${stream.height} ${bitrate}k ${bitDepth} -> ${action} \n`;
 }
 
 function plugin(file, librarySettings, inputs) {
@@ -237,8 +274,9 @@ function plugin(file, librarySettings, inputs) {
   let needModifyAudio = false;
   let needModifySubtitle = false;
   let maxFrameBitrate = 0;
-  let noAudioCopied = true;
   let outputStreamIndex = 0;
+  let audioMap = {};
+  let audioMapDel = {};
   // Go through each stream in the file.
   for (let i = 0; i < file.ffProbeData.streams.length; i++) {
     let stream = file.ffProbeData.streams[i];
@@ -280,7 +318,7 @@ function plugin(file, librarySettings, inputs) {
       // check bitrate
       let currentBitrate = getTrackBitrate(track);
       if (currentBitrate === '?') {
-        currentBitrate = calTotalBitrate(file);
+        currentBitrate = calTotalBitrate(file, track);
       }
       // Check if video stream is HDR or 10bit
       let bitDepth = "8-bit";
@@ -320,34 +358,40 @@ function plugin(file, librarySettings, inputs) {
     else if (stream.codec_type.toLowerCase() === 'audio') {
       let lang = getLang(stream, track).toLowerCase();
       let removeAudio = false;
-      if (audio_remove_except.length > 0) {
-        if (!matchListAny(lang, audio_remove_except)) {
-          // response.infoLog += `Unkeep codec : ${audio_remove_except} : ${audio_remove_except.length} : ${lang}\n`;
-          removeAudio = true;
+      if (lang !== 'und') {
+        if (audio_remove_except.length > 0) {
+          if (!matchListAny(lang, audio_remove_except)) {
+            // response.infoLog += `Unkeep codec : ${audio_remove_except} : ${audio_remove_except.length} : ${lang}\n`;
+            removeAudio = true;
+          }
+        }
+        if (audio_remove.length > 0) {
+          if (matchListAny(lang, audio_remove)) {
+            // response.infoLog += `Remove codec : ${audio_remove} : ${audio_remove.length} : ${lang}\n`;
+            removeAudio = true;
+          }
         }
       }
-      if (audio_remove.length > 0) {
-        if (matchListAny(lang, audio_remove)) {
-          // response.infoLog += `Remove codec : ${audio_remove} : ${audio_remove.length} : ${lang}\n`;
-          removeAudio = true;
-        }
-      }
-      if (audio_title_remove.length > 0) {
-        if (includesListAny(title.toLowerCase(), audio_title_remove)) {
-          // response.infoLog += `Remove title : ${audio_title_remove} : ${audio_title_remove.length} : ${lang}\n`;
-          removeAudio = true;
+      if (title !== undefined) {
+        if (audio_title_remove.length > 0) {
+          if (includesListAny(title.toLowerCase(), audio_title_remove)) {
+            // response.infoLog += `Remove title : ${audio_title_remove} : ${audio_title_remove.length} : ${lang}\n`;
+            removeAudio = true;
+          }
         }
       }
       if (removeAudio) {
         // skip
-        needModifyAudio = true;
-        response.infoLog += infoAudio(file, stream, 'removed');
+        // response.infoLog += infoAudio(file, stream, 'removed');
+
+        cacheAudio(file, stream, audioMapDel);
       }
       else {
-        noAudioCopied = false;
-        extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
-        response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] copy`);
-        outputStreamIndex++;
+        // extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
+        // response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] copy`);
+        // outputStreamIndex++;
+
+        cacheAudio(file, stream, audioMap);
       }
     }
 
@@ -372,12 +416,48 @@ function plugin(file, librarySettings, inputs) {
     }
   }
 
-  if (noAudioCopied) {
-    // all audio removed according to the rules
-    needModifyAudio = false;
-    extraArguments += ` -map 0:a -c:a copy`;
-    response.infoLog += `Audio rule failed, keep all audio\n`;
+  // all audio removed according to the rules, fallback to remove nothing  
+  if (Object.keys(audioMap).length === 0) {    
+    audioMap = audioMapDel;
+    audioMapDel = {};
   }
+  // select audio
+  for (lang in audioMap) {
+    let audioArray = audioMap[lang];
+    audioArray.sort(function(a, b) {
+      if (a.channels > b.channels)
+        return -1;
+      if (a.channels < b.channels)
+        return 1;
+      return a.index - b.index;
+    });
+    // copy until default
+    for (let i = 0; i < audioArray.length; i++) {
+      let stream = audioArray[i];
+      extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
+      response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] copy`);
+      outputStreamIndex++;
+      if (lang !== 'und') {
+        if (stream.disposition !== undefined && stream.disposition.default === 1) {
+          for (i++; i < audioArray.length; i++) {
+            stream = audioArray[i];
+            response.infoLog += infoAudio(file, stream, 'removed');
+            needModifyAudio = true;
+          }
+          break;
+        }
+      }
+    }
+  }
+  for (lang in audioMapDel) {
+    let audioArray = audioMapDel[lang];
+    for (let i = 0; i < audioArray.length; i++) {
+      let stream = audioArray[i];
+      response.infoLog += infoAudio(file, stream, 'removed');
+      needModifyAudio = true;
+    }
+  }
+
 
   if (!needModifyVideo && !needModifyAudio && !needModifySubtitle) {
     response.processFile = false;
