@@ -102,7 +102,7 @@ function getLang(stream, track)
     lang = stream.tags.language;
   if (lang === undefined)
     lang = "und";
-  return lang;
+  return normalizeLang(lang);
 }
 
 function fillLangAlias_set(langList, aliasSet) 
@@ -162,7 +162,7 @@ function normalizeLang(lang)
 function cacheAudio(file, stream, audioMap)
 {
   let track = findTrack(file, stream);
-  let lang = normalizeLang(getLang(stream, track));  
+  let lang = getLang(stream, track);  
   // init map
   if (audioMap[lang] === undefined)
     audioMap[lang] = [];
@@ -272,13 +272,19 @@ function plugin(file, librarySettings, inputs) {
 
   // Set up required variables.
   let extraArguments = '';
+  let maxFrameBitrate = 0;
+  let outputStreamIndex = 0;
+
   let needModifyVideo = false;
   let needModifyAudio = false;
   let needModifySubtitle = false;
-  let maxFrameBitrate = 0;
-  let outputStreamIndex = 0;
+  
   let audioMap = {};
   let audioMapDel = {};
+
+  let subStreams = { zh:[], en:[], und:[] };
+  let defaultSub = undefined;
+
   // Go through each stream in the file.
   for (let i = 0; i < file.ffProbeData.streams.length; i++) {
     let stream = file.ffProbeData.streams[i];
@@ -405,6 +411,18 @@ function plugin(file, librarySettings, inputs) {
         response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> removed \n`;
       }
       else {
+        let sub = { "outputStreamIndex":outputStreamIndex, "stream":stream, "lang":lang };
+
+        if (zhAlias.indexOf(lang) >= 0)
+          subStreams.zh.push(sub);
+        if (enAlias.indexOf(lang) >= 0)
+          subStreams.en.push(sub);
+        else
+          subStreams.und.push(sub);
+
+        if (stream.disposition !== undefined && stream.disposition.default === 1)
+          defaultSub = sub;
+
         extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
         response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> [${outputStreamIndex}] copy\n`;
         outputStreamIndex++;
@@ -468,6 +486,32 @@ function plugin(file, librarySettings, inputs) {
     }
   }
 
+  // select default subtitle
+  if (defaultSub !== undefined && defaultSub.lang === zhAlias[0]) {
+    // good, do nothing
+  }
+  else if (defaultSub === undefined) {        
+    if (subStreams.zh.length > 0)
+      defaultSub = subStreams.zh[0];
+    else if (subStreams.en.length > 0)
+      defaultSub = subStreams.en[0];
+    else if (subStreams.und.length > 0)
+      defaultSub = subStreams.und[0];
+    if (defaultSub !== undefined) {  
+      extraArguments += ` -disposition:${defaultSub.outputStreamIndex} default`;
+      response.infoLog += `Subtitle default -> [${defaultSub.stream.index}]\n`;
+      needModifySubtitle = true;
+    }
+  }
+  else {
+    // non-chinese sub
+    if (subStreams.zh.length > 0) {
+      let newSelection = subStreams.zh[0];
+      extraArguments += ` -disposition:${defaultSub.outputStreamIndex} 0 -disposition:${newSelection.outputStreamIndex} default`;
+      response.infoLog += `Subtitle default [${defaultSub.stream.index}] -> [${newSelection.stream.index}]\n`;
+      needModifySubtitle = true;
+    }
+  }
 
   if (!needModifyVideo && !needModifyAudio && !needModifySubtitle) {
     response.processFile = false;
