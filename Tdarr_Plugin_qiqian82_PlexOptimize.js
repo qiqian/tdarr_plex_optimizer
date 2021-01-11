@@ -40,9 +40,11 @@ function findTrack(file, stream)
 {
   for (let i = 0; i < file.mediaInfo.track.length; i++) {
     let track = file.mediaInfo.track[i];
-    if (track.StreamOrder === undefined)
+    if (track.StreamOrder === undefined && track.ID === undefined)
       continue;
-    if (Number(track.StreamOrder) == stream.index)
+    if (stream.index !== undefined && Number(track.StreamOrder) === stream.index)
+      return track;
+    if (stream.id !== undefined && Number(track.ID) === Number(stream.id))
       return track;
   }
 }
@@ -304,15 +306,15 @@ function plugin(file, librarySettings, inputs) {
 
       // bitrate calculator
       let targetBitrate = 1500; // 480p
-      if (track.Width > 640)
+      if (stream.width > 640)
         targetBitrate = 3200; // sd
-      if (track.Width > 1280)
+      if (stream.width > 1280)
         targetBitrate = 7200; // 1k
-      if (track.Width > 1920)
+      if (stream.width > 1920)
         targetBitrate = 18000; // 2k
-      if (track.Width > 2560)
+      if (stream.width > 2560)
         targetBitrate = 28780; // 4k
-      if (track.Width > 3840)
+      if (stream.width > 3840)
         targetBitrate = 115139; // 8k
 
       // check bitrate
@@ -434,8 +436,16 @@ function plugin(file, librarySettings, inputs) {
     // copy until default
     for (let i = 0; i < audioArray.length; i++) {
       let stream = audioArray[i];
-      extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
-      response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] copy`);
+      let track = findTrack(file, stream);
+      let acodec = 'copy';
+      if (stream.codec_name === 'pcm_bluray') {
+        if (track.BitDepth == '16')
+          acodec = 'pcm_s16le';
+        if (track.BitDepth == '24')
+          acodec = 'pcm_s24le';
+      }
+      extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} ${acodec}`;
+      response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec}`);
       outputStreamIndex++;
       if (lang !== 'und') {
         if (stream.disposition !== undefined && stream.disposition.default === 1) {
