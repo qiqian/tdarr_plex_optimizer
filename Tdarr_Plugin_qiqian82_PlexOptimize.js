@@ -455,18 +455,26 @@ function plugin(file, librarySettings, inputs) {
     for (let i = 0; i < audioArray.length; i++) {
       let stream = audioArray[i];
       let track = findTrack(file, stream);
+      let defaultFlag = 0;
+      if (stream.disposition !== undefined && stream.disposition.default === 1)
+      	defaultFlag = 1;
+
       let acodec = 'copy';
-      if (stream.codec_name === 'pcm_bluray') {
-        if (track.BitDepth == '16')
-          acodec = 'pcm_s16le';
-        if (track.BitDepth == '24')
-          acodec = 'pcm_s24le';
+      if (stream.codec_name === "pcm_bluray") {
+        if (Number(track.BitDepth) == 16)
+          acodec = `pcm_s16le`;
+        if (Number(track.BitDepth) == 24)
+          acodec = `pcm_s24le`;
+      	if (Number(track.BitDepth) == 32)
+          acodec = `pcm_s32le`;
+      	acodec += ` -disposition:${outputStreamIndex} ${defaultFlag}`;
+      	needModifyAudio = true;      	  
       }
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} ${acodec}`;
       response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec}`);
       outputStreamIndex++;
       if (lang !== 'und') {
-        if (stream.disposition !== undefined && stream.disposition.default === 1) {
+        if (defaultFlag === 1) {
           for (i++; i < audioArray.length; i++) {
             stream = audioArray[i];
             response.infoLog += infoAudio(file, stream, 'removed');
