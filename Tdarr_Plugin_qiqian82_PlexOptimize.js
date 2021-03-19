@@ -178,7 +178,7 @@ function infoAudio(file, stream, action)
   let title = findTitle(stream, track);
   let lang = getLang(stream, track);
   return `Audio[${stream.index}], ${title}, ${lang}, ${stream.codec_name} `
-  + `[${track.ChannelLayout}] ${bitrate}k -> ${action} \n`; 
+  + `${bitrate}k -> ${action} \n`; 
 }
 
 function matchListAny(name, listAny)
@@ -236,7 +236,7 @@ function plugin(file, librarySettings, inputs) {
     preset: '',
     handBrakeMode: false,
     FFmpegMode: true,
-    reQueueAfter: true,
+    reQueueAfter: false,
     infoLog: '',
   };
 
@@ -430,9 +430,10 @@ function plugin(file, librarySettings, inputs) {
     }
 
     else {
-      extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
-      response.infoLog += `Stream[${stream.index}], ${title}, ${stream.codec_name} -> [${outputStreamIndex}] copy\n`;
-      outputStreamIndex++;
+      // extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
+      // outputStreamIndex++;
+      // mkv only supports audio/video/subtitle
+      response.infoLog += `Stream[${stream.index}], ${title}, ${stream.codec_name} -> removed\n`;      
     }
   }
 
@@ -457,7 +458,7 @@ function plugin(file, librarySettings, inputs) {
       let track = findTrack(file, stream);
       let defaultFlag = 0;
       if (stream.disposition !== undefined && stream.disposition.default === 1)
-      	defaultFlag = 1;
+        defaultFlag = 1;
 
       let acodec = 'copy';
       if (stream.codec_name === "pcm_bluray") {
@@ -465,10 +466,10 @@ function plugin(file, librarySettings, inputs) {
           acodec = `pcm_s16le`;
         if (Number(track.BitDepth) == 24)
           acodec = `pcm_s24le`;
-      	if (Number(track.BitDepth) == 32)
+        if (Number(track.BitDepth) == 32)
           acodec = `pcm_s32le`;
-      	acodec += ` -disposition:${outputStreamIndex} ${defaultFlag}`;
-      	needModifyAudio = true;      	  
+        acodec += ` -disposition:${outputStreamIndex} ${defaultFlag}`;
+        needModifyAudio = true;         
       }
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} ${acodec}`;
       response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec}`);
