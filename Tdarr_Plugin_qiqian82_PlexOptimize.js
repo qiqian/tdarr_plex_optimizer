@@ -290,7 +290,6 @@ function plugin(file, librarySettings, inputs) {
     let stream = file.ffProbeData.streams[i];
     let track = findTrack(file, stream);
     let title = findTitle(stream, track);
-    
     // Check if stream is a video.
     if (stream.codec_type.toLowerCase() === 'video') {
       // Check if codec of stream is mjpeg/png, if so then remove this "video" stream.
@@ -340,30 +339,38 @@ function plugin(file, librarySettings, inputs) {
         response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] copy`);
         outputStreamIndex++;
         continue;
+        //targetBitrate = currentBitrate;
+        //minBitrate = parseInt(targetBitrate * 0.9);
+        //maxBitrate = parseInt(targetBitrate * 1.1);
       }
       else {
-        // re-encode
-        needModifyVideo = true;
+        // re-encode        
         minBitrate = parseInt(targetBitrate * 0.6);
         maxBitrate = parseInt(targetBitrate * 1.4);
         if (maxBitrate > currentBitrate)
           maxBitrate = parseInt(currentBitrate);
-        maxFrameBitrate += maxBitrate;
-
-        extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} libx265 `
-        + `-b:${stream.index} ${targetBitrate}k `
-        + `-minrate:${stream.index} ${minBitrate}k `
-        + `-maxrate:${stream.index} ${maxBitrate}k `;
-        if (bitDepth === "10-bit") {
-          extraArguments += " -pix_fmt yuv420p10le";
-        }
-        response.infoLog += infoVideo(file, stream, 
-          `[${outputStreamIndex}] x265 ${targetBitrate}k ${bitDepth}`);
-        outputStreamIndex++;
       }
-    }
 
-    else if (stream.codec_type.toLowerCase() === 'audio') {
+      needModifyVideo = true;
+      maxFrameBitrate += maxBitrate;
+
+      extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} libx265 `
+      + `-b:${stream.index} ${targetBitrate}k `
+      + `-minrate:${stream.index} ${minBitrate}k `
+      + `-maxrate:${stream.index} ${maxBitrate}k `;
+      if (bitDepth === "10-bit") {
+        extraArguments += " -pix_fmt yuv420p10le";
+      }
+      response.infoLog += infoVideo(file, stream, 
+        `[${outputStreamIndex}] x265 ${targetBitrate}k ${bitDepth}`);
+      outputStreamIndex++;
+    }
+  }
+  for (let i = 0; i < file.ffProbeData.streams.length; i++) {
+    let stream = file.ffProbeData.streams[i];
+    let track = findTrack(file, stream);
+    let title = findTitle(stream, track);
+    if (stream.codec_type.toLowerCase() === 'audio') {
       let lang = getLang(stream, track).toLowerCase();
       let removeAudio = false;
       if (lang !== 'und') {
@@ -402,8 +409,12 @@ function plugin(file, librarySettings, inputs) {
         cacheAudio(file, stream, audioMap);
       }
     }
-
-    else if (stream.codec_type.toLowerCase() === 'subtitle') {
+  }
+  for (let i = 0; i < file.ffProbeData.streams.length; i++) {
+    let stream = file.ffProbeData.streams[i];
+    let track = findTrack(file, stream);
+    let title = findTitle(stream, track);
+    if (stream.codec_type.toLowerCase() === 'subtitle') {
       let lang = getLang(stream, track).toLowerCase();
       if (zhAlias.indexOf(lang) < 0 && enAlias.indexOf(lang) < 0 && lang !== 'und') {
         // remove  
@@ -428,8 +439,14 @@ function plugin(file, librarySettings, inputs) {
         outputStreamIndex++;
       }
     }
-
-    else {
+  }
+  for (let i = 0; i < file.ffProbeData.streams.length; i++) {
+    let stream = file.ffProbeData.streams[i];
+    let track = findTrack(file, stream);
+    let title = findTitle(stream, track);
+    if (stream.codec_type.toLowerCase() !== 'video' &&
+        stream.codec_type.toLowerCase() !== 'audio' &&
+        stream.codec_type.toLowerCase() !== 'subtitle') {
       // extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
       // outputStreamIndex++;
       // mkv only supports audio/video/subtitle
@@ -462,15 +479,22 @@ function plugin(file, librarySettings, inputs) {
 
       let acodec = 'copy';
       if (stream.codec_name === "pcm_bluray") {
+        // mkv doesn't support pcm_bluray
         if (Number(track.BitDepth) == 16)
           acodec = `pcm_s16le`;
         if (Number(track.BitDepth) == 24)
           acodec = `pcm_s24le`;
         if (Number(track.BitDepth) == 32)
-          acodec = `pcm_s32le`;
-        acodec += ` -disposition:${outputStreamIndex} ${defaultFlag}`;
+          acodec = `pcm_s32le`;        
         needModifyAudio = true;         
       }
+      if (track.CodecID === "A_AAC-1") {
+        // plex-android doesn't play A_AAC-1
+        acodec = `libfdk_aac -profile:a aac_he_v2 -b:${outputStreamIndex} ${stream.sample_rate}`;
+        needModifyAudio = true;         
+      }
+      if (needModifyAudio)
+        acodec += ` -disposition:${outputStreamIndex} ${defaultFlag}`;
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} ${acodec}`;
       response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec}`);
       outputStreamIndex++;
