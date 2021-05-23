@@ -111,12 +111,14 @@ function fixLang(lang, stream, track)
   if (lang !== 'und')
     return lang;
   let title = findTitle(stream, track);
-  if (includesListAny(title.toLowerCase(), zhTitle))
-    return zhAlias[0];
-  if (includesListAny(title.toLowerCase(), enTitle))
-    return enAlias[0];
-  if (includesListAny(title.toLowerCase(), jpTitle))
-    return jpAlias[0];
+  if (title !== undefined) {
+    if (includesListAny(title.toLowerCase(), zhTitle))
+      return zhAlias[0];
+    if (includesListAny(title.toLowerCase(), enTitle))
+      return enAlias[0];
+    if (includesListAny(title.toLowerCase(), jpTitle))
+      return jpAlias[0];
+  }
   return 'und';
 }
 
