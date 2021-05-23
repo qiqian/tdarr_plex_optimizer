@@ -509,15 +509,18 @@ function plugin(file, librarySettings, inputs) {
       let acodec = 'copy';
       if (stream.codec_name === "pcm_bluray") {
         // mkv doesn't support pcm_bluray
-        if (Number(track.BitDepth) == 16)
-          acodec = `pcm_s16le`;
-        if (Number(track.BitDepth) == 24)
-          acodec = `pcm_s24le`;
-        if (Number(track.BitDepth) == 32)
-          acodec = `pcm_s32le`;        
+        acodec = `pcm_s16le`;
+        if (track !== undefined) {
+          if (Number(track.BitDepth) == 16)
+            acodec = `pcm_s16le`;
+          if (Number(track.BitDepth) == 24)
+            acodec = `pcm_s24le`;
+          if (Number(track.BitDepth) == 32)
+            acodec = `pcm_s32le`;   
+        }     
         needModifyAudio = true;         
       }
-      if (track.CodecID === "A_AAC-1") {
+      if (track !== undefined && track.CodecID === "A_AAC-1") {
         // plex-android doesn't play A_AAC-1
         acodec = `libfdk_aac -profile:a aac_he_v2 -b:${outputStreamIndex} ${stream.sample_rate}`;
         needModifyAudio = true;         
