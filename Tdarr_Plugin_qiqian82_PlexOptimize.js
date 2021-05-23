@@ -102,7 +102,22 @@ function getLang(stream, track)
     lang = stream.tags.language;
   if (lang === undefined)
     lang = "und";
-  return normalizeLang(lang);
+  lang = normalizeLang(lang);
+  return lang;
+}
+
+function fixLang(lang, stream, track)
+{
+  if (lang !== 'und')
+    return lang;
+  let title = findTitle(stream, track);
+  if (includesListAny(title.toLowerCase(), zhTitle))
+    return zhAlias[0];
+  if (includesListAny(title.toLowerCase(), enTitle))
+    return enAlias[0];
+  if (includesListAny(title.toLowerCase(), jpTitle))
+    return jpAlias[0];
+  return 'und';
 }
 
 function fillLangAlias_set(langList, aliasSet) 
@@ -129,6 +144,10 @@ const krAlias = ['kor', 'kr'];
 const frAlias = ['fr', 'fre', 'fra', 'fro', 'frm'];
 const geAlias = ['gem', 'ger', 'deu', 'de', 'gmh', 'goh'];
 const spaAlias = ['spa', 'es'];
+const zhTitle = ['中文', '国语', '汉语', '国配', '台配', '辽艺', '普通话', 'Chinese'];
+const enTitle = ['英语', '英文', 'English'];
+const jpTitle = ['日语', '日文', 'Japanese'];
+const ffmpegLangDict = { 'zh' : 'chi', 'en' : 'eng', 'ja' : 'jpn' };
 
 function fillLangAlias(langList)
 {  
@@ -163,6 +182,7 @@ function cacheAudio(file, stream, audioMap)
 {
   let track = findTrack(file, stream);
   let lang = getLang(stream, track);  
+  lang = fixLang(lang, stream, track);
   // init map
   if (audioMap[lang] === undefined)
     audioMap[lang] = [];
@@ -278,6 +298,7 @@ function plugin(file, librarySettings, inputs) {
   let needModifyVideo = false;
   let needModifyAudio = false;
   let needModifySubtitle = false;
+  let needDiscardExtra = false;
   
   let audioMap = {};
   let audioMapDel = {};
@@ -329,7 +350,8 @@ function plugin(file, librarySettings, inputs) {
       }
       // Check if video stream is HDR or 10bit
       let bitDepth = "8-bit";
-      if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10') {
+      if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10' || stream.pix_fmt == 'yuv420p10le' ||
+          track.Format_Profile === 'High 10' || track.BitDepth === '10') {
         bitDepth = "10-bit";
         targetBitrate *= 1.25;
       }
@@ -375,13 +397,13 @@ function plugin(file, librarySettings, inputs) {
       let removeAudio = false;
       if (lang !== 'und') {
         if (audio_remove_except.length > 0) {
-          if (!matchListAny(lang, audio_remove_except)) {
+          if (!matchListAny(fixLang(lang, stream, track), audio_remove_except)) {
             // response.infoLog += `Unkeep codec : ${audio_remove_except} : ${audio_remove_except.length} : ${lang}\n`;
             removeAudio = true;
           }
         }
         if (audio_remove.length > 0) {
-          if (matchListAny(lang, audio_remove)) {
+          if (matchListAny(fixLang(lang, stream, track), audio_remove)) {
             // response.infoLog += `Remove codec : ${audio_remove} : ${audio_remove.length} : ${lang}\n`;
             removeAudio = true;
           }
@@ -407,6 +429,9 @@ function plugin(file, librarySettings, inputs) {
         // outputStreamIndex++;
 
         cacheAudio(file, stream, audioMap);
+
+        if (lang !== fixLang(lang, stream, track))
+          needModifyAudio = true;
       }
     }
   }
@@ -451,6 +476,7 @@ function plugin(file, librarySettings, inputs) {
       // outputStreamIndex++;
       // mkv only supports audio/video/subtitle
       response.infoLog += `Stream[${stream.index}], ${title}, ${stream.codec_name} -> removed\n`;      
+      needDiscardExtra = true;
     }
   }
 
@@ -473,6 +499,7 @@ function plugin(file, librarySettings, inputs) {
     for (let i = 0; i < audioArray.length; i++) {
       let stream = audioArray[i];
       let track = findTrack(file, stream);
+      let title = findTitle(stream, track);
       let defaultFlag = 0;
       if (stream.disposition !== undefined && stream.disposition.default === 1)
         defaultFlag = 1;
@@ -495,7 +522,15 @@ function plugin(file, librarySettings, inputs) {
       }
       if (needModifyAudio)
         acodec += ` -disposition:${outputStreamIndex} ${defaultFlag}`;
+      
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} ${acodec}`;
+      if (title !== undefined)
+        extraArguments += ` -metadata:s:${outputStreamIndex} title=${title}`;      
+      if (ffmpegLangDict.hasOwnProperty(lang)) {
+        ffmpegLang = ffmpegLangDict[lang];
+        extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`;
+      }
+
       response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec}`);
       outputStreamIndex++;
       if (lang !== 'und') {
@@ -546,7 +581,7 @@ function plugin(file, librarySettings, inputs) {
     }
   }
 
-  if (!needModifyVideo && !needModifyAudio && !needModifySubtitle) {
+  if (!needModifyVideo && !needModifyAudio && !needModifySubtitle && !needDiscardExtra) {
     response.processFile = false;
     response.infoLog += `File doesn't need optimize \n`;
     return response;
