@@ -527,7 +527,7 @@ function plugin(file, librarySettings, inputs) {
       
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} ${acodec}`;
       if (title !== undefined)
-        extraArguments += ` -metadata:s:${outputStreamIndex} title=${title}`;      
+        extraArguments += ` -metadata:s:${outputStreamIndex} title="${title}"`;      
       if (ffmpegLangDict.hasOwnProperty(lang)) {
         ffmpegLang = ffmpegLangDict[lang];
         extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`;
