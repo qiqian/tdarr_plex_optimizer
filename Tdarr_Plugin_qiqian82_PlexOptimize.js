@@ -353,7 +353,7 @@ function plugin(file, librarySettings, inputs) {
       // Check if video stream is HDR or 10bit
       let bitDepth = "8-bit";
       if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10' || stream.pix_fmt == 'yuv420p10le' ||
-          track.Format_Profile === 'High 10' || track.BitDepth === '10') {
+          (track !== undefined && (track.Format_Profile === 'High 10' || track.BitDepth === '10')) ) {
         bitDepth = "10-bit";
         targetBitrate *= 1.25;
       }
