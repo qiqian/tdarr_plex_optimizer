@@ -146,7 +146,7 @@ const krAlias = ['kor', 'kr'];
 const frAlias = ['fr', 'fre', 'fra', 'fro', 'frm'];
 const geAlias = ['gem', 'ger', 'deu', 'de', 'gmh', 'goh'];
 const spaAlias = ['spa', 'es'];
-const zhTitle = ['中文', '国语', '汉语', '国配', '台配', '辽艺', '普通话', 'Chinese'];
+const zhTitle = ['中文', '國', '国语', '汉语', '国配', '台配', '辽艺', '普通话', 'Chinese'];
 const enTitle = ['英语', '英文', 'English'];
 const jpTitle = ['日语', '日文', 'Japanese'];
 const ffmpegLangDict = { 'zh' : 'chi', 'en' : 'eng', 'ja' : 'jpn' };
@@ -397,6 +397,7 @@ function plugin(file, librarySettings, inputs) {
     if (stream.codec_type.toLowerCase() === 'audio') {
       let lang = getLang(stream, track).toLowerCase();
       let removeAudio = false;
+
       if (lang !== 'und') {
         if (audio_remove_except.length > 0) {
           if (!matchListAny(fixLang(lang, stream, track), audio_remove_except)) {
@@ -419,6 +420,7 @@ function plugin(file, librarySettings, inputs) {
           }
         }
       }
+      
       if (removeAudio) {
         // skip
         // response.infoLog += infoAudio(file, stream, 'removed');
@@ -586,7 +588,7 @@ function plugin(file, librarySettings, inputs) {
     }
   }
 
-  if (!needModifyVideo && !needModifyAudio && !needModifySubtitle && !needDiscardExtra) {
+  if (!needModifyVideo && !needModifyAudio && !needModifySubtitle && !needDiscardExtra && response.container === file.container ) {
     response.processFile = false;
     response.infoLog += `File doesn't need optimize \n`;
     return response;
