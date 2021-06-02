@@ -318,18 +318,22 @@ function plugin(file, librarySettings, inputs) {
       // Check if codec of stream is mjpeg/png, if so then remove this "video" stream.
       // mjpeg/png are usually embedded pictures that can cause havoc with plugins.
       if (stream.codec_name === 'mjpeg' || stream.codec_name === 'png') {
-        extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
-        response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] copy`);
-        outputStreamIndex++;
+        response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] removed`);
         continue;
       }
       // Check if codec of stream is hevc or vp9 AND check if file.container matches inputs.container.
       // If so nothing for plugin to do.
       if (stream.codec_name === 'hevc' || stream.codec_name === 'vp9') {
         extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
-        response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] copy`);
+        response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] retain`);
         outputStreamIndex++;
         continue;
+      }
+
+      // check bitrate
+      let currentBitrate = getTrackBitrate(track);
+      if (currentBitrate === '?') {
+        currentBitrate = calTotalBitrate(file, track);
       }
 
       // bitrate calculator
@@ -345,48 +349,27 @@ function plugin(file, librarySettings, inputs) {
       if (stream.width > 3840)
         targetBitrate = 115139; // 8k
 
-      // check bitrate
-      let currentBitrate = getTrackBitrate(track);
-      if (currentBitrate === '?') {
-        currentBitrate = calTotalBitrate(file, track);
-      }
       // Check if video stream is HDR or 10bit
       let bitDepth = "8-bit";
       if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10' || stream.pix_fmt == 'yuv420p10le' ||
           (track !== undefined && (track.Format_Profile === 'High 10' || track.BitDepth === '10')) ) {
         bitDepth = "10-bit";
-        targetBitrate *= 1.25;
+    	targetBitrate *= parseInt(1.25);
       }
 
-      if (targetBitrate >= currentBitrate) {
-        extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
-        response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] copy`);
-        outputStreamIndex++;
-        continue;
-        //targetBitrate = currentBitrate;
-        //minBitrate = parseInt(targetBitrate * 0.9);
-        //maxBitrate = parseInt(targetBitrate * 1.1);
-      }
-      else {
-        // re-encode        
-        minBitrate = parseInt(targetBitrate * 0.6);
-        maxBitrate = parseInt(targetBitrate * 1.4);
-        if (maxBitrate > currentBitrate)
-          maxBitrate = parseInt(currentBitrate);
-      }
-
+      // re-encode
       needModifyVideo = true;
-      maxFrameBitrate += maxBitrate;
+      let maxVideoBitrate = parseInt(targetBitrate * 1.5);
+      let vbvBuff = parseInt(targetBitrate * 2);
+      maxFrameBitrate += vbvBuff;
 
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} libx265 `
-      + `-b:${stream.index} ${targetBitrate}k `
-      + `-minrate:${stream.index} ${minBitrate}k `
-      + `-maxrate:${stream.index} ${maxBitrate}k `;
+      + `-crf 24 -preset slow -x265-params vbv-maxrate=${maxVideoBitrate}:vbv-bufsize=${vbvBuff} `;
       if (bitDepth === "10-bit") {
         extraArguments += " -pix_fmt yuv420p10le";
       }
       response.infoLog += infoVideo(file, stream, 
-        `[${outputStreamIndex}] x265 ${targetBitrate}k ${bitDepth}`);
+        `[${outputStreamIndex}] x265 ${bitDepth}`);
       outputStreamIndex++;
     }
   }
@@ -596,7 +579,7 @@ function plugin(file, librarySettings, inputs) {
   else {
     maxFrameBitrate *= 2;
     maxFrameBitrate = parseInt(maxFrameBitrate);
-    response.preset += `, -movflags use_metadata_tags ${extraArguments} -max_muxing_queue_size 9999 -bufsize ${maxFrameBitrate}k`;
+    response.preset += `, -movflags use_metadata_tags ${extraArguments} -max_muxing_queue_size 9999`;
     response.processFile = true;
   }
   return response;
