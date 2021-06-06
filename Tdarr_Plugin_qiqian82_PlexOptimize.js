@@ -525,10 +525,21 @@ function plugin(file, librarySettings, inputs) {
         needModifyAudio = true;         
       }
       if ( (track !== undefined && track.CodecID === "A_AAC-1") || 
-          (stream.codec_name === "aac" && stream.profile !== "HE-AACv2") ||
+          (stream.codec_name === "aac" && 
+            (stream.profile !== "LC" && stream.profile !== "HE-AAC" && stream.profile !== "HE-AACv2" && stream.profile !== "LD" && stream.profile !== "ELD") ) ||
           stream.codec_name === "ac3") {
         // plex-android doesn't play A_AAC-1
-        acodec = `libfdk_aac -profile:${outputStreamIndex} aac_he_v2 -b:${outputStreamIndex} ${stream.sample_rate}`;
+        let sampleRate = parseInt(stream.sample_rate);
+        let aacVbr = '1';
+        if (sampleRate >= 32000)
+          aacVbr = '2';
+        if (sampleRate >= 40000)
+          aacVbr = '3';
+        if (sampleRate >= 56000)
+          aacVbr = '4';
+        if (sampleRate >= 80000)
+          aacVbr = '5';
+        acodec = `libfdk_aac -profile:${outputStreamIndex} aac_he_v2 -vbr ${aacVbr}`;
         needModifyAudio = true;         
       }
       if (needModifyAudio)
