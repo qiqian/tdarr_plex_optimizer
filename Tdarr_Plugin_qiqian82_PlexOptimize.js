@@ -261,6 +261,9 @@ function plugin(file, librarySettings, inputs) {
     reQueueAfter: false,
     infoLog: '',
   };
+  
+  var os = require("os")
+  response.infoLog += `${os.hostname()} ram : ${os.totalmem()}\n`;
 
   // Check if file is a video. If it isn't then exit plugin.
   if (file.fileMedium !== 'video') {
