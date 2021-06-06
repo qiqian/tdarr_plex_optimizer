@@ -308,6 +308,20 @@ function plugin(file, librarySettings, inputs) {
   let subStreams = { zh:[], en:[], und:[] };
   let defaultSub = undefined;
 
+  let hasValidVideoTrack = false;
+  let hasValidAudioTrack = false;
+  for (let i = 0; i < file.ffProbeData.streams.length; i++) {
+    let stream = file.ffProbeData.streams[i];
+    let track = findTrack(file, stream);
+    if (track === undefined)
+      continue;
+    // Check if stream is a video.
+    if (stream.codec_type.toLowerCase() === 'video')
+      hasValidVideoTrack = true;
+    if (stream.codec_type.toLowerCase() === 'audio')
+      hasValidAudioTrack = true;
+  }
+
   // Go through each stream in the file.
   for (let i = 0; i < file.ffProbeData.streams.length; i++) {
     let stream = file.ffProbeData.streams[i];
@@ -317,7 +331,7 @@ function plugin(file, librarySettings, inputs) {
     if (stream.codec_type.toLowerCase() === 'video') {
       // Check if codec of stream is mjpeg/png, if so then remove this "video" stream.
       // mjpeg/png are usually embedded pictures that can cause havoc with plugins.
-      if (stream.codec_name === 'mjpeg' || stream.codec_name === 'png') {
+      if (stream.codec_name === 'mjpeg' || stream.codec_name === 'png' || (hasValidVideoTrack && track === undefined) ) {
         response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] removed`);
         continue;
       }
@@ -354,7 +368,7 @@ function plugin(file, librarySettings, inputs) {
       if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10' || stream.pix_fmt == 'yuv420p10le' ||
           (track !== undefined && (track.Format_Profile === 'High 10' || track.BitDepth === '10')) ) {
         bitDepth = "10-bit";
-    	targetBitrate *= parseInt(1.25);
+        targetBitrate *= parseInt(1.25);
       }
 
       // re-encode
@@ -364,7 +378,7 @@ function plugin(file, librarySettings, inputs) {
       maxFrameBitrate += vbvBuff;
 
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} libx265 `
-      + `-crf 24 -preset slow -x265-params vbv-maxrate=${maxVideoBitrate}:vbv-bufsize=${vbvBuff} `;
+      + `-crf 25 -preset slow -x265-params vbv-maxrate=${maxVideoBitrate}:vbv-bufsize=${vbvBuff} `;
       if (bitDepth === "10-bit") {
         extraArguments += " -pix_fmt yuv420p10le";
       }
@@ -381,6 +395,10 @@ function plugin(file, librarySettings, inputs) {
       let lang = getLang(stream, track).toLowerCase();
       let removeAudio = false;
 
+      if (hasValidAudioTrack && track === undefined) {
+        removeAudio = true;
+      }
+      else {
       if (lang !== 'und') {
         if (audio_remove_except.length > 0) {
           if (!matchListAny(fixLang(lang, stream, track), audio_remove_except)) {
@@ -402,6 +420,7 @@ function plugin(file, librarySettings, inputs) {
             removeAudio = true;
           }
         }
+      }
       }
       
       if (removeAudio) {
@@ -505,17 +524,21 @@ function plugin(file, librarySettings, inputs) {
         }     
         needModifyAudio = true;         
       }
-      if (track !== undefined && track.CodecID === "A_AAC-1") {
+      if ( (track !== undefined && track.CodecID === "A_AAC-1") || 
+          (stream.codec_name === "aac" && stream.profile !== "HE-AACv2") ||
+          stream.codec_name === "ac3") {
         // plex-android doesn't play A_AAC-1
-        acodec = `libfdk_aac -profile:a aac_he_v2 -b:${outputStreamIndex} ${stream.sample_rate}`;
+        acodec = `libfdk_aac -profile:${outputStreamIndex} aac_he_v2 -b:${outputStreamIndex} ${stream.sample_rate}`;
         needModifyAudio = true;         
       }
       if (needModifyAudio)
         acodec += ` -disposition:${outputStreamIndex} ${defaultFlag}`;
       
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} ${acodec}`;
-      if (title !== undefined)
+      if (title !== undefined) {
+        title = title.split('"').join('');
         extraArguments += ` -metadata:s:${outputStreamIndex} title="${title}"`;      
+      }
       if (ffmpegLangDict.hasOwnProperty(lang)) {
         ffmpegLang = ffmpegLangDict[lang];
         extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`;
