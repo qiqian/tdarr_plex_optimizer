@@ -108,8 +108,8 @@ function getLang(stream, track)
 
 function fixLang(lang, stream, track)
 {
-  if (lang !== 'und')
-    return lang;
+  //if (lang !== 'und')
+  //  return lang;
   let title = findTitle(stream, track);
   if (title !== undefined) {
     if (includesListAny(title.toLowerCase(), zhTitle))
@@ -119,7 +119,7 @@ function fixLang(lang, stream, track)
     if (includesListAny(title.toLowerCase(), jpTitle))
       return jpAlias[0];
   }
-  return 'und';
+  return lang;
 }
 
 function fillLangAlias_set(langList, aliasSet) 
@@ -530,7 +530,8 @@ function plugin(file, librarySettings, inputs) {
       if ( (track !== undefined && track.CodecID === "A_AAC-1") || 
           (stream.codec_name === "aac" && 
             (stream.profile !== "LC" && stream.profile !== "HE-AAC" && stream.profile !== "HE-AACv2" && stream.profile !== "LD" && stream.profile !== "ELD") ) ||
-          stream.codec_name === "ac3") {
+          stream.codec_name === "ac3" ||
+          stream.codec_name === "mp3" ) {
         // plex-android doesn't play A_AAC-1
         let sampleRate = parseInt(stream.sample_rate);
         let aacVbr = '1';
