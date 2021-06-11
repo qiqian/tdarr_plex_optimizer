@@ -539,10 +539,10 @@ function plugin(file, librarySettings, inputs) {
           aacVbr = '2';
         if (sampleRate >= 40000)
           aacVbr = '3';
-        if (sampleRate >= 56000)
-          aacVbr = '4';
-        if (sampleRate >= 80000)
-          aacVbr = '5';
+        //if (sampleRate >= 56000)
+        //  aacVbr = '4';
+        //if (sampleRate >= 80000)
+        //  aacVbr = '5';
         acodec = `libfdk_aac -profile:${outputStreamIndex} aac_he_v2 -vbr:${outputStreamIndex} ${aacVbr}`;
         needModifyAudio = true;         
       }
