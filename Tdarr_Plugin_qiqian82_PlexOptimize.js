@@ -46,7 +46,10 @@ function findTrack(file, stream)
       return track;
     if (stream.id !== undefined && Number(track.ID) === Number(stream.id))
       return track;
+    if (Number(track.ID) === Number(stream.index) + 1)
+      return track;
   }
+  return undefined;
 }
 
 function getTrackBitrate(track)
@@ -252,6 +255,35 @@ function infoVideo(file, stream, action)
   + `${stream.width}x${stream.height} ${bitrate}k ${bitDepth} -> ${action} \n`;
 }
 
+function guessSubLang(sub)
+{
+  let subLangConfig = [ 
+    { 'lang' : 'zh', 'title' : '繁体中文', 'Sep' : '', 'mark' : 
+      ['為','類','問','從','這','個','時','間','裏','卻','們','樣','點','終','讓','對'] }, 
+
+    { 'lang' : 'zh', 'title' : '简体中文', 'Sep' : '', 'mark' : 
+      ['为','类','问','从','这','个','时','间','里','却','们','样','点','终','让','对'] }, 
+    
+    { 'lang' : 'en', 'title' : '英语', 'Sep' : ' ', 'mark' :  
+      ['the','and','that','this','here','have','there','he','she','for','not',
+       'with','you','their','what','take','one','all','my','will','her','say',
+       'they','from','but'] }
+    ];
+  let data = require('fs').readFileSync(sub, 'utf8').toLowerCase();
+  data = data.substring(data.indexOf(' --> 00:1')); // skip 10 min
+  for (let i = 0; i < subLangConfig.length; i++) {
+      let config = subLangConfig[i];
+      let count = 0;
+      for (let k = 0; k < config.mark.length; k++) {
+        if (data.includes(config.Sep + config.mark[k] + config.Sep))
+          ++count;
+        if (count >= 3)
+          return config;
+      }
+  }
+  return undefined;
+}
+
 function plugin(file, librarySettings, inputs) {
   const response = {
     processFile: false,
@@ -264,6 +296,8 @@ function plugin(file, librarySettings, inputs) {
   
   var os = require("os")
   response.infoLog += `${os.hostname()} ram : ${os.totalmem()}\n`;
+  response.infoLog += `file : ${JSON.stringify(file.file)}\n`;
+  response.infoLog += `cache: ${JSON.stringify(librarySettings.cache)}\n`;
 
   // Check if file is a video. If it isn't then exit plugin.
   if (file.fileMedium !== 'video') {
@@ -450,6 +484,22 @@ function plugin(file, librarySettings, inputs) {
     let title = findTitle(stream, track);
     if (stream.codec_type.toLowerCase() === 'subtitle') {
       let lang = getLang(stream, track).toLowerCase();
+      let guessLangInfo = undefined;
+      // fix unset lang
+      if (lang === "und" && track !== undefined
+          && track.Format !== "PGS" && track.Format !== "VobSub") {
+        // tmp file
+        let sub = require('path').join(librarySettings.cache, 
+          "subs-" + require('crypto').randomBytes(16).toString('hex') + ".srt");
+        // extract sub
+        require("child_process").execSync(
+          `ffmpeg -threads 4 -loglevel warning -sub_charenc utf8 -i "${file.file}" -map 0:${stream.index} ${sub}`);
+        // guess
+        guessLangInfo = guessSubLang(sub);
+        // delete sub
+        require('fs').unlinkSync(sub)
+      }
+
       if (zhAlias.indexOf(lang) < 0 && enAlias.indexOf(lang) < 0 && lang !== 'und') {
         // remove  
         needModifySubtitle = true;
@@ -469,7 +519,18 @@ function plugin(file, librarySettings, inputs) {
           defaultSub = sub;
 
         extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
-        response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> [${outputStreamIndex}] copy\n`;
+        let guessLangResult = lang;
+        if (guessLangInfo !== undefined) {
+          needModifySubtitle = true;
+          // set lang
+          let guessLangResult = guessLangInfo.lang;
+          let ffmpegLang = ffmpegLangDict[guessLangInfo];
+          extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`;
+          // set title
+          if (title == 'und' || title === undefined)
+            extraArguments += ` -metadata:s:${outputStreamIndex} title="${guessLangInfo.title}"`;      
+        }
+        response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> [${outputStreamIndex}], ${guessLangResult}, copy\n`;
         outputStreamIndex++;
       }
     }
@@ -529,9 +590,11 @@ function plugin(file, librarySettings, inputs) {
       }
       if ( (track !== undefined && track.CodecID === "A_AAC-1") || 
           (stream.codec_name === "aac" && 
-            (stream.profile !== "LC" && stream.profile !== "HE-AAC" && stream.profile !== "HE-AACv2" && stream.profile !== "LD" && stream.profile !== "ELD") ) ||
+            (stream.profile !== "LC" && stream.profile !== "HE-AAC" && stream.profile !== "HE-AACv2" && stream.profile !== "LD" && stream.profile !== "ELD") 
+            && stream.channels == 2) ||
           (stream.codec_name === "ac3" && stream.channels == 2) ||
-          stream.codec_name === "mp3" ) {
+          stream.codec_name === "mp3" ||
+          stream.channels == 2 ) {
         // plex-android doesn't play A_AAC-1
         let sampleRate = parseInt(stream.sample_rate);
         let aacVbr = '1';
