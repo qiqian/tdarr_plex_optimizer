@@ -524,7 +524,7 @@ function plugin(file, librarySettings, inputs) {
           needModifySubtitle = true;
           // set lang
           guessLangResult = guessLangInfo.lang;
-          let ffmpegLang = ffmpegLangDict[guessLangInfo];
+          let ffmpegLang = ffmpegLangDict[guessLangResult];
           extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`;
           // set title
           if (title == 'und' || title === undefined)
