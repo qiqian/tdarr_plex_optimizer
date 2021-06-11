@@ -527,7 +527,7 @@ function plugin(file, librarySettings, inputs) {
           let ffmpegLang = ffmpegLangDict[guessLangResult];
           extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`;
           // set title
-          if (title == 'und' || title === undefined)
+          if (title === 'und' || title === undefined)
             extraArguments += ` -metadata:s:${outputStreamIndex} title="${guessLangInfo.title}"`;      
         }
         response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> [${outputStreamIndex}], ${guessLangResult}, copy\n`;
