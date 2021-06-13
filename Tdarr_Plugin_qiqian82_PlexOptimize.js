@@ -52,36 +52,20 @@ function findTrack(file, stream)
   return undefined;
 }
 
-function getTrackBitrate(track)
+function getTrackBitrate(stream, track)
 {
-  let bitrate = undefined;
-  if (track !== undefined) {
-    bitrate = track.BitRate;
-    if (bitrate === undefined)
-      bitrate = track.BitRate_Nominal;  
+  let bitrate = stream.bit_rate;
+  if (bitrate === undefined) {
+    if (track !== undefined) {
+      bitrate = track.BitRate;
+      if (bitrate === undefined)
+        bitrate = track.BitRate_Nominal;  
+    }
   }
-  if (bitrate === undefined)
-    return "?";
-  return Number(bitrate) / 1000;
-}
-function calTotalBitrate(file, track)
-{
-  // Check if duration info is filled, if so times it by 0.0166667 to get time in minutes.
-  // If not filled then get duration of stream 0 and do the same.
-  let duration = '';
-  if (typeof file.meta.Duration !== 'undefined') {
-    duration = file.meta.Duration * 0.0166667;
-  } else {
-    duration = file.ffProbeData.streams[0].duration * 0.0166667;
+  if (bitrate === undefined) {
+    return -1;
   }
-  // Work out currentBitrate using "Bitrate = file size / (number of minutes * .0075)"
-  // Used from here https://blog.frame.io/2017/03/06/calculate-video-bitrates/
-  // eslint-disable-next-line no-bitwise
-  let streamSize = file.file_size;
-  if (track !== undefined && track.StreamSize !== undefined) {
-    streamSize = Number(track.StreamSize)
-  }
-  return ~~(streamSize / (duration * 0.0075));
+  return parseInt(bitrate);
 }
 
 function findTitle(stream, track)
@@ -199,11 +183,13 @@ function cacheAudio(file, stream, audioMap)
 function infoAudio(file, stream, action)
 {
   let track = findTrack(file, stream);
-  let bitrate = getTrackBitrate(track);
+  let bitrate = getTrackBitrate(stream, track);
+  if (bitrate < 0)
+    bitrate = "?";
   let title = findTitle(stream, track);
   let lang = getLang(stream, track);
   return `Audio[${stream.index}], ${title}, ${lang}, ${stream.codec_name} `
-  + `${bitrate}k -> ${action} \n`; 
+  + `${bitrate} -> ${action} \n`; 
 }
 
 function matchListAny(name, listAny)
@@ -244,15 +230,15 @@ function cleanupArray(listAny)
 function infoVideo(file, stream, action)
 {
   let track = findTrack(file, stream);
-  let bitrate = getTrackBitrate(track);
-  if (bitrate === '?')
-    bitrate = calTotalBitrate(file, track) + "?";
+  let bitrate = getTrackBitrate(stream, track);
+  if (bitrate <= 0)
+    bitrate = "?";
   let title = findTitle(stream, track);
   let bitDepth = "8-bit";
   if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10')
      bitDepth = "10-bit";
   return `Video[${stream.index}], ${title}, ${stream.codec_name} `
-  + `${stream.width}x${stream.height} ${bitrate}k ${bitDepth} -> ${action} \n`;
+  + `${stream.width}x${stream.height} ${bitrate} ${bitDepth} -> ${action} \n`;
 }
 
 function guessSubLang(sub)
@@ -381,12 +367,6 @@ function plugin(file, librarySettings, inputs) {
         continue;
       }
 
-      // check bitrate
-      let currentBitrate = getTrackBitrate(track);
-      if (currentBitrate === '?') {
-        currentBitrate = calTotalBitrate(file, track);
-      }
-
       // bitrate calculator
       let targetBitrate = 1500; // 480p
       if (stream.width > 640)
@@ -415,7 +395,7 @@ function plugin(file, librarySettings, inputs) {
       maxFrameBitrate += vbvBuff;
 
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} libx265 `
-      + `-crf 25 -preset slow -x265-params vbv-maxrate=${maxVideoBitrate}:vbv-bufsize=${vbvBuff} `;
+      + `-crf 24 -preset slow -x265-params vbv-maxrate=${maxVideoBitrate}:vbv-bufsize=${vbvBuff} `;
       if (bitDepth === "10-bit") {
         extraArguments += " -pix_fmt yuv420p10le";
       }
@@ -588,24 +568,15 @@ function plugin(file, librarySettings, inputs) {
         }     
         needModifyAudio = true;         
       }
-      if ( (track !== undefined && track.CodecID === "A_AAC-1") || 
-          (stream.codec_name === "aac" && 
+      if ( stream.channels == 2 && 
+          ( stream.codec_name !== "aac" || 
+            // not common aac profile
             (stream.profile !== "LC" && stream.profile !== "HE-AAC" && stream.profile !== "HE-AACv2" && stream.profile !== "LD" && stream.profile !== "ELD") 
-            && stream.channels == 2) ||
-          (stream.codec_name === "ac3" && stream.channels == 2) ||
-          stream.codec_name === "mp3" ||
-          stream.channels == 2 ) {
-        // plex-android doesn't play A_AAC-1
-        let sampleRate = parseInt(stream.sample_rate);
-        let aacVbr = '1';
-        if (sampleRate >= 32000)
-          aacVbr = '2';
-        if (sampleRate >= 40000)
-          aacVbr = '3';
-        //if (sampleRate >= 56000)
-        //  aacVbr = '4';
-        //if (sampleRate >= 80000)
-        //  aacVbr = '5';
+            ) ) {
+        // stereo aac has best compatibility
+        let bitrate = getTrackBitrate(stream, track);        
+        
+        let aacVbr = '5';
         acodec = `libfdk_aac -profile:${outputStreamIndex} aac_he_v2 -vbr:${outputStreamIndex} ${aacVbr}`;
         needModifyAudio = true;         
       }
@@ -680,7 +651,9 @@ function plugin(file, librarySettings, inputs) {
   else {
     maxFrameBitrate *= 2;
     maxFrameBitrate = parseInt(maxFrameBitrate);
-    response.preset += `, -movflags use_metadata_tags ${extraArguments} -max_muxing_queue_size 9999`;
+    // randomize queue size to work around tdarr "same argument as last time" bug ?
+    let queueSize = 9999;// + Math.floor(Math.random() * 10000);
+    response.preset += `, -movflags use_metadata_tags ${extraArguments} -max_muxing_queue_size ${queueSize}`;
     response.processFile = true;
   }
   return response;
