@@ -658,7 +658,8 @@ function plugin(file, librarySettings, inputs) {
       }
       else if (track !== undefined) {
         title = track.Format_Commercial_IfAny;
-        needModifyAudio = true;         
+        if (title !== undefined)
+          needModifyAudio = true;         
       }
       if (title !== undefined)
         extraArguments += ` -metadata:${outputStreamIndex} title="${title}"`;        
