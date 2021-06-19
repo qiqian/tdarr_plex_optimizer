@@ -54,18 +54,28 @@ function findTrack(file, stream)
 
 function getTrackBitrate(stream, track)
 {
-  let bitrate = stream.bit_rate;
-  if (bitrate === undefined) {
-    if (track !== undefined) {
-      bitrate = track.BitRate;
-      if (bitrate === undefined)
-        bitrate = track.BitRate_Nominal;  
-    }
-  }
-  if (bitrate === undefined) {
+  if (stream.bit_rate !== undefined) 
+    return parseInt(stream.bit_rate);
+  
+  if (track === undefined)
     return -1;
-  }
-  return parseInt(bitrate);
+
+  if (track.BitRate !== undefined)
+    return parseInt(track.BitRate);
+
+  if (track.BitRate_Nominal !== undefined)
+    return parseInt(track.BitRate_Nominal); 
+    
+  if (track.StreamSize === undefined)
+    return -1;
+
+  let duration = track.Duration;
+  //if (duration === undefined)
+  //  duration = file.meta.Duration;
+  if (duration === undefined)
+    return -1;
+
+  return parseInt(Number.parseFloat(track.StreamSize) / Number.parseFloat(duration));
 }
 
 function findTitle(stream, track)
@@ -233,12 +243,14 @@ function infoVideo(file, stream, action)
   let bitrate = getTrackBitrate(stream, track);
   if (bitrate <= 0)
     bitrate = "?";
+  else 
+    bitrate = parseInt(bitrate / 1000);
   let title = findTitle(stream, track);
   let bitDepth = "8-bit";
   if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10')
      bitDepth = "10-bit";
   return `Video[${stream.index}], ${title}, ${stream.codec_name} `
-  + `${stream.width}x${stream.height} ${bitrate} ${bitDepth} -> ${action} \n`;
+  + `${stream.width}x${stream.height} ${bitrate}k ${bitDepth} -> ${action} \n`;
 }
 
 function guessSubLang(sub)
@@ -268,6 +280,13 @@ function guessSubLang(sub)
       }
   }
   return undefined;
+}
+
+function extractNormalizedValue(v, norm)
+{
+  let parts = v.split('/');
+  let scale = norm / parseInt(parts[1]);
+  return parseInt(parts[0]) * scale;
 }
 
 function plugin(file, librarySettings, inputs) {
@@ -358,14 +377,6 @@ function plugin(file, librarySettings, inputs) {
         response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] removed`);
         continue;
       }
-      // Check if codec of stream is hevc or vp9 AND check if file.container matches inputs.container.
-      // If so nothing for plugin to do.
-      if (stream.codec_name === 'hevc' || stream.codec_name === 'vp9') {
-        extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
-        response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] retain`);
-        outputStreamIndex++;
-        continue;
-      }
 
       // bitrate calculator
       let targetBitrate = 1500; // 480p
@@ -382,10 +393,62 @@ function plugin(file, librarySettings, inputs) {
 
       // Check if video stream is HDR or 10bit
       let bitDepth = "8-bit";
-      if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10' || stream.pix_fmt == 'yuv420p10le' ||
-          (track !== undefined && (track.Format_Profile === 'High 10' || track.BitDepth === '10')) ) {
+      if (stream.profile === 'High 10' || stream.profile === 'Main 10' ||
+          stream.bits_per_raw_sample === '10' || stream.pix_fmt == 'yuv420p10le' ||
+          (track !== undefined && (track.Format_Profile === 'High 10' || track.Format_Profile === 'Main 10' || track.BitDepth === '10')) ) {
         bitDepth = "10-bit";
-        targetBitrate *= parseInt(1.25);
+        targetBitrate = parseInt(targetBitrate * 1.25);
+      }
+
+      // re-encode h265 if necessary
+      let targetCRF = 24;
+      if (stream.codec_name === 'hevc' && track !== undefined) {
+        let keepHevc = false;
+        // skip if encoded in hevc crf mode
+        if (track !== undefined && track.Encoded_Library_Settings !== undefined) {
+          if (track.Encoded_Library_Settings.includes('/ rc=crf / crf='))
+            keepHevc = true;
+        }
+        // keep stream if at reasonable bitrate 
+        let bitrate = getTrackBitrate(stream, track);
+        if (bitrate > 0 && bitrate <= targetBitrate * 1000) {
+          keepHevc = true;
+        }
+        // keep hdr10+ && dolby vision
+        if (track.HDR_Format_Compatibility !== undefined && track.HDR_Format_Compatibility !== "HDR10") {
+          keepHevc = true;
+        }
+
+        if (keepHevc) {
+          extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
+          response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] retain`);
+          outputStreamIndex++;
+          continue;
+        }
+        // re-encode to vbr
+        targetCRF = 19;
+      }
+
+      // hdr info
+      let hdrconfig = ``;
+      if (track.HDR_Format_Compatibility === "HDR10") {
+        let ff_cmd = ` ffprobe -hide_banner -loglevel error -select_streams ${stream.index} -print_format json -show_frames -read_intervals "%+#1" -show_entries "frame=color_space,color_primaries,color_transfer,side_data_list,pix_fmt" -i "${file.file}" `;
+        const hdrinfo = JSON.parse(require("child_process").execSync(ff_cmd)).frames[0];
+        const hdrdisplay = hdrinfo.side_data_list[0];
+        const hdrcll = hdrinfo.side_data_list[1];
+        const red_x = extractNormalizedValue(hdrdisplay.red_x, 50000);
+        const red_y = extractNormalizedValue(hdrdisplay.red_y, 50000);
+        const green_x = extractNormalizedValue(hdrdisplay.green_x, 50000);
+        const green_y = extractNormalizedValue(hdrdisplay.green_y, 50000);
+        const blue_x = extractNormalizedValue(hdrdisplay.blue_x, 50000);
+        const blue_y = extractNormalizedValue(hdrdisplay.blue_y, 50000);
+        const white_point_x = extractNormalizedValue(hdrdisplay.white_point_x, 50000);
+        const white_point_y = extractNormalizedValue(hdrdisplay.white_point_y, 50000);
+        const min_luminance = extractNormalizedValue(hdrdisplay.min_luminance, 10000);
+        const max_luminance = extractNormalizedValue(hdrdisplay.max_luminance, 10000);
+        const max_content = hdrcll.max_content;
+        const max_average = hdrcll.max_average; 
+        hdrconfig = `hdr-opt=1:repeat-headers=1:colorprim=${hdrinfo.color_primaries}:transfer=${hdrinfo.color_transfer}:colormatrix=${hdrinfo.color_space}:master-display=G(${green_x},${green_y})B(${blue_x},${blue_y})R(${red_x},${red_y})WP(${white_point_x},${white_point_y})L(${max_luminance},${min_luminance}):max-cll=${max_content},${max_average}:`;
       }
 
       // re-encode
@@ -395,12 +458,11 @@ function plugin(file, librarySettings, inputs) {
       maxFrameBitrate += vbvBuff;
 
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} libx265 `
-      + `-crf 24 -preset slow -x265-params vbv-maxrate=${maxVideoBitrate}:vbv-bufsize=${vbvBuff} `;
-      if (bitDepth === "10-bit") {
+      + `-crf ${targetCRF} -preset slower -x265-params ${hdrconfig}vbv-maxrate=${maxVideoBitrate}:vbv-bufsize=${vbvBuff} `;
+      if (bitDepth === "10-bit" || track.HDR_Format_Compatibility === "HDR10") {
         extraArguments += " -pix_fmt yuv420p10le";
       }
-      response.infoLog += infoVideo(file, stream, 
-        `[${outputStreamIndex}] x265 ${bitDepth}`);
+      response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] x265 ${bitDepth}`);
       outputStreamIndex++;
     }
   }
