@@ -237,6 +237,13 @@ function cleanupArray(listAny)
   }
 }
 
+function is10bit(stream, track) 
+{
+  return stream.profile === 'High 10' || stream.profile === 'Main 10' ||
+          stream.bits_per_raw_sample === '10' || stream.pix_fmt == 'yuv420p10le' ||
+          (track !== undefined && (track.Format_Profile === 'High 10' || track.Format_Profile === 'Main 10' || track.BitDepth === '10'));
+}
+
 function infoVideo(file, stream, action)
 {
   let track = findTrack(file, stream);
@@ -246,9 +253,7 @@ function infoVideo(file, stream, action)
   else 
     bitrate = parseInt(bitrate / 1000);
   let title = findTitle(stream, track);
-  let bitDepth = "8-bit";
-  if (stream.profile === 'High 10' || stream.bits_per_raw_sample === '10')
-     bitDepth = "10-bit";
+  let bitDepth = is10bit(stream, track) ? "8-bit" : "10-bit";
   return `Video[${stream.index}], ${title}, ${stream.codec_name} `
   + `${stream.width}x${stream.height} ${bitrate}k ${bitDepth} -> ${action} \n`;
 }
@@ -393,9 +398,7 @@ function plugin(file, librarySettings, inputs) {
 
       // Check if video stream is HDR or 10bit
       let bitDepth = "8-bit";
-      if (stream.profile === 'High 10' || stream.profile === 'Main 10' ||
-          stream.bits_per_raw_sample === '10' || stream.pix_fmt == 'yuv420p10le' ||
-          (track !== undefined && (track.Format_Profile === 'High 10' || track.Format_Profile === 'Main 10' || track.BitDepth === '10')) ) {
+      if (is10bit(stream, track)) {
         bitDepth = "10-bit";
         targetBitrate = parseInt(targetBitrate * 1.25);
       }
@@ -457,8 +460,7 @@ function plugin(file, librarySettings, inputs) {
       let vbvBuff = parseInt(targetBitrate * 2);
       maxFrameBitrate += vbvBuff;
 
-      extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} libx265 `
-      + `-crf ${targetCRF} -preset slow -x265-params ${hdrconfig}vbv-maxrate=${maxVideoBitrate}:vbv-bufsize=${vbvBuff} `;
+      extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} libx265 -crf ${targetCRF} -preset slow -x265-params ${hdrconfig}vbv-maxrate=${maxVideoBitrate}:vbv-bufsize=${vbvBuff} `;
       if (bitDepth === "10-bit" || track.HDR_Format_Compatibility === "HDR10") {
         extraArguments += " -pix_fmt yuv420p10le";
       }
