@@ -458,7 +458,7 @@ function plugin(file, librarySettings, inputs) {
       maxFrameBitrate += vbvBuff;
 
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} libx265 `
-      + `-crf ${targetCRF} -preset slower -x265-params ${hdrconfig}vbv-maxrate=${maxVideoBitrate}:vbv-bufsize=${vbvBuff} `;
+      + `-crf ${targetCRF} -preset slow -x265-params ${hdrconfig}vbv-maxrate=${maxVideoBitrate}:vbv-bufsize=${vbvBuff} `;
       if (bitDepth === "10-bit" || track.HDR_Format_Compatibility === "HDR10") {
         extraArguments += " -pix_fmt yuv420p10le";
       }
@@ -648,8 +648,20 @@ function plugin(file, librarySettings, inputs) {
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} ${acodec}`;
       if (title !== undefined) {
         title = title.split('"').join('');
-        extraArguments += ` -metadata:s:${outputStreamIndex} title="${title}"`;      
+        if (track !== undefined && track.Format_Commercial_IfAny !== undefined && track.Format_Commercial_IfAny.includes('Dolby Atmos'))
+          // mark dolby atmos
+          if (!title.toLowerCase().includes('dolby atmos')) {    
+            title += ' Dolby Atmos';
+            needModifyAudio = true;         
+          }
+        }
       }
+      else if (track !== undefined) {
+        title = track.Format_Commercial_IfAny;
+        needModifyAudio = true;         
+      }
+      if (title !== undefined)
+        extraArguments += ` -metadata:s:${outputStreamIndex} title="${title}"`;        
       if (ffmpegLangDict.hasOwnProperty(lang)) {
         ffmpegLang = ffmpegLangDict[lang];
         extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`;
@@ -658,7 +670,16 @@ function plugin(file, librarySettings, inputs) {
       response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec}`);
       outputStreamIndex++;
       if (lang !== 'und') {
+        let skipOther = false;
         if (defaultFlag === 1) {
+          if (track !== undefined) {
+            if (track.Format_Commercial_IfAny === undefined)
+              skipOther = true;
+            else if (!track.Format_Commercial_IfAny.includes('Dolby Atmos'))
+              skipOther = true;
+          }
+        }
+        if (skipOther) {
           for (i++; i < audioArray.length; i++) {
             stream = audioArray[i];
             response.infoLog += infoAudio(file, stream, 'removed');
