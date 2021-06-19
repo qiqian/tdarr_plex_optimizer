@@ -567,10 +567,10 @@ function plugin(file, librarySettings, inputs) {
           // set lang
           guessLangResult = guessLangInfo.lang;
           let ffmpegLang = ffmpegLangDict[guessLangResult];
-          extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`;
+          extraArguments += ` -metadata:${outputStreamIndex} language=${ffmpegLang}`;
           // set title
           if (title === 'und' || title === undefined)
-            extraArguments += ` -metadata:s:${outputStreamIndex} title="${guessLangInfo.title}"`;      
+            extraArguments += ` -metadata:${outputStreamIndex} title="${guessLangInfo.title}"`;      
         }
         response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> [${outputStreamIndex}], ${guessLangResult}, copy\n`;
         outputStreamIndex++;
@@ -648,7 +648,7 @@ function plugin(file, librarySettings, inputs) {
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} ${acodec}`;
       if (title !== undefined) {
         title = title.split('"').join('');
-        if (track !== undefined && track.Format_Commercial_IfAny !== undefined && track.Format_Commercial_IfAny.includes('Dolby Atmos'))
+        if (track !== undefined && track.Format_Commercial_IfAny !== undefined && track.Format_Commercial_IfAny.includes('Dolby Atmos')) {
           // mark dolby atmos
           if (!title.toLowerCase().includes('dolby atmos')) {    
             title += ' Dolby Atmos';
@@ -661,10 +661,10 @@ function plugin(file, librarySettings, inputs) {
         needModifyAudio = true;         
       }
       if (title !== undefined)
-        extraArguments += ` -metadata:s:${outputStreamIndex} title="${title}"`;        
+        extraArguments += ` -metadata:${outputStreamIndex} title="${title}"`;        
       if (ffmpegLangDict.hasOwnProperty(lang)) {
         ffmpegLang = ffmpegLangDict[lang];
-        extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`;
+        extraArguments += ` -metadata:${outputStreamIndex} language=${ffmpegLang}`;
       }
 
       response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec}`);
