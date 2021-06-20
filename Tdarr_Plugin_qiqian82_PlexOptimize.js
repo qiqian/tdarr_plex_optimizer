@@ -569,10 +569,10 @@ function plugin(file, librarySettings, inputs) {
           // set lang
           guessLangResult = guessLangInfo.lang;
           let ffmpegLang = ffmpegLangDict[guessLangResult];
-          extraArguments += ` -metadata:${outputStreamIndex} language=${ffmpegLang}`;
+          extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`; // s: for stream
           // set title
           if (title === 'und' || title === undefined)
-            extraArguments += ` -metadata:${outputStreamIndex} title="${guessLangInfo.title}"`;      
+            extraArguments += ` -metadata:s:${outputStreamIndex} title="${guessLangInfo.title}"`; // s: for stream
         }
         response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> [${outputStreamIndex}], ${guessLangResult}, copy\n`;
         outputStreamIndex++;
@@ -664,10 +664,10 @@ function plugin(file, librarySettings, inputs) {
           needModifyAudio = true;         
       }
       if (title !== undefined)
-        extraArguments += ` -metadata:${outputStreamIndex} title="${title}"`;        
+        extraArguments += ` -metadata:s:${outputStreamIndex} title="${title}"`; // s: for stream       
       if (ffmpegLangDict.hasOwnProperty(lang)) {
         ffmpegLang = ffmpegLangDict[lang];
-        extraArguments += ` -metadata:${outputStreamIndex} language=${ffmpegLang}`;
+        extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`; // s: for stream
       }
 
       response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec}`);
