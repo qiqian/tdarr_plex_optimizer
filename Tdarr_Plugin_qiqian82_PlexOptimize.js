@@ -253,7 +253,7 @@ function infoVideo(file, stream, action)
   else 
     bitrate = parseInt(bitrate / 1000);
   let title = findTitle(stream, track);
-  let bitDepth = is10bit(stream, track) ? "8-bit" : "10-bit";
+  let bitDepth = is10bit(stream, track) ? "10-bit" : "8-bit";
   return `Video[${stream.index}], ${title}, ${stream.codec_name} `
   + `${stream.width}x${stream.height} ${bitrate}k ${bitDepth} -> ${action} \n`;
 }
