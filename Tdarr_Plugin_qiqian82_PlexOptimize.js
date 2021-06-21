@@ -324,6 +324,10 @@ function extractNormalizedValue(v, norm)
 
 function findOriginalLang(nfoFile, apiKey, response) 
 {
+  if (!require('fs').existsSync(nfoFile)) {
+    return "und";
+  }
+  
   const nfo = require('fs').readFileSync(nfoFile, 'utf8');
 
   const seasonRegex = /<season>([0-9]+)<\/season>/;
