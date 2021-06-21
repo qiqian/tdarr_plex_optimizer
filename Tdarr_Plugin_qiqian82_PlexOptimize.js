@@ -31,6 +31,10 @@ function details() {
                \\Leave empty to disable.
                \\nExample:\\n
                粤,cantonese`,
+    },
+    {
+      name: 'tmdb_api_key',
+      tooltip: `The Movie Database API Key`,
     }
     ],
   };
@@ -318,6 +322,103 @@ function extractNormalizedValue(v, norm)
   return parseInt(parts[0]) * scale;
 }
 
+function findOriginalLang(nfoFile, apiKey, response) 
+{
+  const nfo = require('fs').readFileSync(nfoFile, 'utf8');
+
+  const seasonRegex = /<season>([0-9]+)<\/season>/;
+  const episodeRegex = /<episode>([0-9]+)<\/episode>/;
+  const imdbidRegex = /<imdbid>tt([0-9]+)<\/imdbid>/;
+  const tvdbidRegex = /<tvdbid>([0-9]+)<\/tvdbid>/;
+  const tmdbidRegex = /<tmdbid>([0-9]+)<\/tmdbid>/;  
+  
+
+  let imdbid = nfo.match(imdbidRegex);
+  if (imdbid != null)
+    imdbid = imdbid[1];
+
+  let tmdbid = nfo.match(tmdbidRegex);  
+  if (tmdbid != null)
+    tmdbid = tmdbid[1];
+
+  let tvdbid = nfo.match(tvdbidRegex);
+  if (tvdbid != null)
+    tvdbid = tvdbid[1];
+
+  // response.infoLog += `imdb:${imdbid}, tmdb:${tmdbid}, tvdb:${tvdbid}`;
+
+  if (nfo.match(seasonRegex) == null || nfo.match(episodeRegex) == null) {
+    // response.infoLog += ` movie\n`;
+    // movie
+    let movieInfo = '';
+    if (tmdbid != null) {
+      const req = `curl --silent -L "https://api.themoviedb.org/3/movie/${tmdbid}/3?api_key=${apiKey}&language=en-US"`;
+      movieInfo = require("child_process").execSync(req);
+      if (movieInfo != null) {
+        movieInfo = JSON.parse(movieInfo);
+        if (movieInfo.success !== undefined && !movieInfo.success)
+          ; // faile
+        else
+          return movieInfo.original_language;
+      }
+    }
+    if (imdbid != null) {
+      const req = `curl --silent -L "https://api.themoviedb.org/3/find/tt${imdbid}?api_key=${apiKey}&language=en-US&external_source=imdb_id"`;
+      movieInfo = require("child_process").execSync(req);
+      if (movieInfo != null) {
+        movieInfo = JSON.parse(movieInfo).movie_results;
+        if (movieInfo.length == 0)
+          ; // fail
+        else 
+          return movieInfo[0].original_language;
+      }
+    }    
+  }
+  else {
+    response.infoLog += ` tv\n`;
+    // find show id
+    let show_id = null;
+    if (tmdbid != null) {
+      const req = `curl --silent -L "https://api.themoviedb.org/3/find/tt${imdbid}?api_key=${apiKey}&language=en-US&external_source=imdb_id"`;
+      let episodeInfo = require("child_process").execSync(req);
+      // response.infoLog += episodeInfo+"\n";
+      if (episodeInfo != null) {
+        episodeInfo = JSON.parse(episodeInfo).tv_episode_results;
+        if (episodeInfo.length == 0)
+          ; // fail
+        else 
+          show_id = episodeInfo[0].show_id;
+      }      
+    }
+    if (show_id == null && tvdbid != null) {
+      const req = `curl --silent -L "https://api.themoviedb.org/3/find/${tvdbid}?api_key=${apiKey}&language=en-US&external_source=tvdb_id"`;
+      let episodeInfo = require("child_process").execSync(req);
+      // response.infoLog += episodeInfo+"\n";
+      if (episodeInfo != null) {
+        episodeInfo = JSON.parse(episodeInfo).tv_episode_results;
+        if (episodeInfo.length == 0)
+          ; // fail
+        else 
+          show_id = episodeInfo[0].show_id;
+      }
+    }
+    if (show_id != null) {
+      // find show info
+      const req = `curl --silent -L "https://api.themoviedb.org/3/tv/${show_id}?api_key=${apiKey}&language=en-US"`;
+      let showInfo = require("child_process").execSync(req);
+      // response.infoLog += showInfo+"\n";
+      if (showInfo != null) {
+        showInfo = JSON.parse(showInfo);
+        if (showInfo.success !== undefined && !showInfo.success)
+          ; // fail
+        else 
+          return showInfo.original_language;
+      }
+    }
+  }
+  return "und";
+}
+
 function plugin(file, librarySettings, inputs) {
   const response = {
     processFile: false,
@@ -329,8 +430,12 @@ function plugin(file, librarySettings, inputs) {
   };
   
   var os = require("os")
+  const nfo = file.file.split('.').slice(0, -1).join('.') + ".nfo";
   response.infoLog += `${os.hostname()} ram : ${os.totalmem()}\n`;
   response.infoLog += `file : ${JSON.stringify(file.file)}\n`;
+  response.infoLog += `nfo : ${nfo}\n`;
+  let originalLang = findOriginalLang(nfo, inputs.tmdb_api_key, response);
+  response.infoLog += `orignal language : ${originalLang}\n`;
   response.infoLog += `cache: ${JSON.stringify(librarySettings.cache)}\n`;
 
   // Check if file is a video. If it isn't then exit plugin.
