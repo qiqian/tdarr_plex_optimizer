@@ -327,7 +327,7 @@ function findOriginalLang(nfoFile, apiKey, response)
   if (!require('fs').existsSync(nfoFile)) {
     return "und";
   }
-  
+
   const nfo = require('fs').readFileSync(nfoFile, 'utf8');
 
   const seasonRegex = /<season>([0-9]+)<\/season>/;
@@ -363,7 +363,7 @@ function findOriginalLang(nfoFile, apiKey, response)
         if (movieInfo.success !== undefined && !movieInfo.success)
           ; // faile
         else
-          return movieInfo.original_language;
+          return normalizeLang(movieInfo.original_language);
       }
     }
     if (imdbid != null) {
@@ -374,7 +374,7 @@ function findOriginalLang(nfoFile, apiKey, response)
         if (movieInfo.length == 0)
           ; // fail
         else 
-          return movieInfo[0].original_language;
+          return normalizeLang(movieInfo[0].original_language);
       }
     }    
   }
@@ -416,7 +416,7 @@ function findOriginalLang(nfoFile, apiKey, response)
         if (showInfo.success !== undefined && !showInfo.success)
           ; // fail
         else 
-          return showInfo.original_language;
+          return normalizeLang(showInfo.original_language);
       }
     }
   }
@@ -633,6 +633,13 @@ function plugin(file, librarySettings, inputs) {
             // response.infoLog += `Remove codec : ${audio_remove} : ${audio_remove.length} : ${lang}\n`;
             removeAudio = true;
           }
+        }
+        // remove non-orig audio if user not specified to keep
+        if (originalLang !== 'und' && lang !== originalLang) {
+          if (!matchListAny(fixLang(lang, stream, track), audio_remove_except)) {
+            // response.infoLog += `Unkeep codec : ${audio_remove_except} : ${audio_remove_except.length} : ${lang}\n`;
+            removeAudio = true;
+          }  
         }
       }
       if (title !== undefined) {
