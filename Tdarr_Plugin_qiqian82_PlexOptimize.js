@@ -357,14 +357,18 @@ function plugin(file, librarySettings, inputs) {
 
   let hasValidVideoTrack = false;
   let hasValidAudioTrack = false;
+  let bestVideoWidth = 0;
   for (let i = 0; i < file.ffProbeData.streams.length; i++) {
     let stream = file.ffProbeData.streams[i];
     let track = findTrack(file, stream);
     if (track === undefined)
       continue;
     // Check if stream is a video.
-    if (stream.codec_type.toLowerCase() === 'video')
+    if (stream.codec_type.toLowerCase() === 'video') {
       hasValidVideoTrack = true;
+      if (stream.width > bestVideoWidth)
+        bestVideoWidth = stream.width;
+    }
     if (stream.codec_type.toLowerCase() === 'audio')
       hasValidAudioTrack = true;
   }
@@ -381,6 +385,10 @@ function plugin(file, librarySettings, inputs) {
       if (stream.codec_name === 'mjpeg' || stream.codec_name === 'png' || (hasValidVideoTrack && track === undefined) ) {
         response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] removed`);
         continue;
+      }
+      if (stream.width < bestVideoWidth) {
+        response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] removed`);
+        continue; 
       }
 
       // bitrate calculator
