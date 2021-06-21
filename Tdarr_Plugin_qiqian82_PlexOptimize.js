@@ -573,7 +573,7 @@ function plugin(file, librarySettings, inputs) {
       }
 
       // re-encode h265 if necessary
-      let targetCRF = 24;
+      let targetCRF = 22;
       if (stream.codec_name === 'hevc' && track !== undefined) {
         let keepHevc = false;
         // skip if encoded in hevc crf mode
@@ -598,7 +598,7 @@ function plugin(file, librarySettings, inputs) {
           continue;
         }
         // re-encode to vbr
-        targetCRF = 19;
+        targetCRF = 20;
       }
 
       // hdr info
