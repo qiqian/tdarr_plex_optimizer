@@ -109,12 +109,12 @@ function fixLang(lang, stream, track)
   //  return lang;
   let title = findTitle(stream, track);
   if (title !== undefined) {
-    if (includesListAny(title.toLowerCase(), zhTitle))
-      return zhAlias[0];
-    if (includesListAny(title.toLowerCase(), enTitle))
-      return enAlias[0];
-    if (includesListAny(title.toLowerCase(), jpTitle))
-      return jpAlias[0];
+    title = title.toLowerCase();
+    for (key in LangMap) {
+      let langInfo = LangMap[key];
+      if (includesListAny(title, langInfo.title))
+        return langInfo.alias[0];
+    }    
   }
   return lang;
 }
@@ -136,45 +136,69 @@ function fillLangAlias_set(langList, aliasSet)
   }
 }
 
-const zhAlias = ['zh', 'chi', 'chn', 'cn', 'zho'];
-const enAlias = ['en', 'eng'];
-const jpAlias = ['ja', 'jpn', 'jp', 'jap'];
-const krAlias = ['kor', 'kr'];
-const frAlias = ['fr', 'fre', 'fra', 'fro', 'frm'];
-const geAlias = ['gem', 'ger', 'deu', 'de', 'gmh', 'goh'];
-const spaAlias = ['spa', 'es'];
-const zhTitle = ['中文', '國', '国语', '汉语', '国配', '台配', '港', '辽艺', '普通话', 'Chinese', 'Mandarin'];
-const enTitle = ['英语', '英文', 'English'];
-const jpTitle = ['日语', '日文', 'Japanese'];
-const ffmpegLangDict = { 'zh' : 'chi', 'en' : 'eng', 'ja' : 'jpn' };
+const LangMap = {
+  'zh' : {
+    'alias' : ['zh', 'chi', 'chn', 'cn', 'zho'],
+    'title' : ['中文', '國', '国语', '汉语', '国配', '台配', '港', '辽艺', '普通话', 'Chinese', 'Mandarin'],
+    'ffmpeg' : 'chi'
+  },
+  'en' : {
+    'alias' : ['en', 'eng'],
+    'title' : ['英语', '英文', 'English'],
+    'ffmpeg' : 'eng'
+  },
+  'ja' : {
+    'alias' : ['ja', 'jpn', 'jp', 'jap'],
+    'title' : ['日语', '日文', 'Japanese'],
+    'ffmpeg' : 'jpn'
+  },
+  'ko' : {
+    'alias' : ['ko', 'kor', 'kr'],
+    'title' : ['韩', 'Korea'],
+    'ffmpeg' : 'kor'
+  },
+  'fr' : {
+    'alias' : ['fr', 'fre', 'fra', 'fro', 'frm'],
+    'title' : ['法语', 'French'],
+    'ffmpeg' : 'fre'
+  },
+  'de' : {
+    'alias' : ['de', 'gem', 'ger', 'deu', 'gmh', 'goh'],
+    'title' : ['德语', 'German'],
+    'ffmpeg' : 'ger'
+  },
+  'es' : {
+    'alias' : ['es', 'spa'],
+    'title' : ['西班牙', 'Spanish'],
+    'ffmpeg' : 'spa'
+  },
+  'th' : {
+    'alias' : ['th', 'tha'],
+    'title' : ['泰', 'Thai'],
+    'ffmpeg' : 'tha'
+  },
+  'hi' : {
+    'alias' : ['hi', 'hin'],
+    'title' : ['印度', 'India'],
+    'ffmpeg' : 'hin'
+  }
+};
 
 function fillLangAlias(langList)
 {  
-  fillLangAlias_set(langList, zhAlias);
-  fillLangAlias_set(langList, enAlias);
-  fillLangAlias_set(langList, jpAlias);
-  fillLangAlias_set(langList, krAlias);
-  fillLangAlias_set(langList, frAlias);
-  fillLangAlias_set(langList, geAlias);
-  fillLangAlias_set(langList, spaAlias);
+  for (lang in LangMap) {
+    let langInfo = LangMap[lang];
+    fillLangAlias_set(langList, langInfo.alias);
+  }
 }
 
 function normalizeLang(lang)
 {  
-  if (zhAlias.indexOf(lang) >= 0)
-    return zhAlias[0];
-  if (enAlias.indexOf(lang) >= 0)
-    return enAlias[0];
-  if (jpAlias.indexOf(lang) >= 0)
-    return jpAlias[0];
-  if (krAlias.indexOf(lang) >= 0)
-    return krAlias[0];
-  if (frAlias.indexOf(lang) >= 0)
-    return frAlias[0];
-  if (geAlias.indexOf(lang) >= 0)
-    return geAlias[0];
-  if (spaAlias.indexOf(lang) >= 0)
-    return spaAlias[0];
+  for (key in LangMap) {
+    let langInfo = LangMap[key];
+    if (langInfo.alias.indexOf(lang) >= 0)
+      return langInfo.alias[0];
+  }
   return lang;
 }
 function cacheAudio(file, stream, audioMap)
@@ -538,6 +562,13 @@ function plugin(file, librarySettings, inputs) {
       let lang = getLang(stream, track).toLowerCase();
       let guessLangInfo = undefined;
       // fix unset lang
+      // response.infoLog += `Subtitle[${stream.index}], ${lang} -> `;
+      if (lang === "und") {
+        lang = fixLang(lang, stream, track);
+        if (lang !== "und")
+          needModifySubtitle = true;
+      }
+      // response.infoLog += ` ${lang} -> `;
       if (lang === "und" && track !== undefined
           && track.Format !== "PGS" && track.Format !== "VobSub") {
         // tmp file
@@ -548,11 +579,18 @@ function plugin(file, librarySettings, inputs) {
           `ffmpeg -threads 4 -loglevel warning -sub_charenc utf8 -i "${file.file}" -map 0:${stream.index} ${sub}`);
         // guess
         guessLangInfo = guessSubLang(sub);
+        if (guessLangInfo !== undefined) {
+          // either delete or update
+          needModifySubtitle = true;
+          lang = guessLangInfo.lang;
+        }
         // delete sub
         require('fs').unlinkSync(sub)
       }
+      // response.infoLog += ` ${lang} \n`;
 
-      if (zhAlias.indexOf(lang) < 0 && enAlias.indexOf(lang) < 0 && lang !== 'und') {
+      // 只保留中英字幕
+      if (LangMap.zh.alias.indexOf(lang) < 0 && LangMap.en.alias.indexOf(lang) < 0 && lang !== 'und') {
         // remove  
         needModifySubtitle = true;
         response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> removed \n`;
@@ -560,9 +598,9 @@ function plugin(file, librarySettings, inputs) {
       else {
         let sub = { "outputStreamIndex":outputStreamIndex, "stream":stream, "lang":lang };
 
-        if (zhAlias.indexOf(lang) >= 0)
+        if (LangMap.zh.alias.indexOf(lang) >= 0)
           subStreams.zh.push(sub);
-        if (enAlias.indexOf(lang) >= 0)
+        else if (LangMap.en.alias.indexOf(lang) >= 0)
           subStreams.en.push(sub);
         else
           subStreams.und.push(sub);
@@ -571,18 +609,25 @@ function plugin(file, librarySettings, inputs) {
           defaultSub = sub;
 
         extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
-        let guessLangResult = lang;
-        if (guessLangInfo !== undefined) {
-          needModifySubtitle = true;
-          // set lang
-          guessLangResult = guessLangInfo.lang;
-          let ffmpegLang = ffmpegLangDict[guessLangResult];
+
+        let langInfo = LangMap[lang];
+        // set lang
+        if (lang !== undefined && lang !== 'und' && langInfo !== undefined) {
+          let ffmpegLang = langInfo.ffmpeg;
           extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`; // s: for stream
-          // set title
-          if (title === 'und' || title === undefined)
-            extraArguments += ` -metadata:s:${outputStreamIndex} title="${guessLangInfo.title}"`; // s: for stream
         }
-        response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> [${outputStreamIndex}], ${guessLangResult}, copy\n`;
+        // set title
+        if ((title === 'und' || title === undefined)) {
+          if (guessLangInfo !== undefined) 
+            title = guessLangInfo.title;
+          if ((title === 'und' || title === undefined) && langInfo !== undefined)
+            title = langInfo.title[0];
+          if (title !== 'und' && title !== undefined) {
+            needModifySubtitle = true;
+            extraArguments += ` -metadata:s:${outputStreamIndex} title="${title}"`; // s: for stream
+          }
+        }
+        response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> [${outputStreamIndex}], copy\n`;
         outputStreamIndex++;
       }
     }
@@ -673,8 +718,8 @@ function plugin(file, librarySettings, inputs) {
       }
       if (title !== undefined)
         extraArguments += ` -metadata:s:${outputStreamIndex} title="${title}"`; // s: for stream       
-      if (ffmpegLangDict.hasOwnProperty(lang)) {
-        ffmpegLang = ffmpegLangDict[lang];
+      if (LangMap.hasOwnProperty(lang)) {
+        ffmpegLang = LangMap[lang].ffmpeg;
         extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`; // s: for stream
       }
 
@@ -711,7 +756,7 @@ function plugin(file, librarySettings, inputs) {
   }
 
   // select default subtitle
-  if (defaultSub !== undefined && defaultSub.lang === zhAlias[0]) {
+  if (defaultSub !== undefined && defaultSub.lang === LangMap.zh.alias[0]) {
     // good, do nothing
   }
   else if (defaultSub === undefined) {        
