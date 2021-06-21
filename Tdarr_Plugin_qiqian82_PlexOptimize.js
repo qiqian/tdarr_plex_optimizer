@@ -158,32 +158,32 @@ const LangMap = {
   },
   'ko' : {
     'alias' : ['ko', 'kor', 'kr'],
-    'title' : ['韩', 'Korea'],
+    'title' : ['韩语', '韩','Korea'],
     'ffmpeg' : 'kor'
   },
   'fr' : {
     'alias' : ['fr', 'fre', 'fra', 'fro', 'frm'],
-    'title' : ['法语', 'French'],
+    'title' : ['法语', '法', 'French'],
     'ffmpeg' : 'fre'
   },
   'de' : {
     'alias' : ['de', 'gem', 'ger', 'deu', 'gmh', 'goh'],
-    'title' : ['德语', 'German'],
+    'title' : ['德语', '德', 'German'],
     'ffmpeg' : 'ger'
   },
   'es' : {
     'alias' : ['es', 'spa'],
-    'title' : ['西班牙', 'Spanish'],
+    'title' : ['西班牙语', '西班牙', 'Spanish'],
     'ffmpeg' : 'spa'
   },
   'th' : {
     'alias' : ['th', 'tha'],
-    'title' : ['泰', 'Thai'],
+    'title' : ['泰语', '泰', 'Thai'],
     'ffmpeg' : 'tha'
   },
   'hi' : {
     'alias' : ['hi', 'hin'],
-    'title' : ['印度', 'India'],
+    'title' : ['印度语', '印度', 'India'],
     'ffmpeg' : 'hin'
   }
 };
@@ -421,6 +421,34 @@ function findOriginalLang(nfoFile, apiKey, response)
     }
   }
   return "und";
+}
+
+function reconstructAudioTitle(lang, stream, track)
+{
+  let title = '';
+
+  let langInfo = LangMap[lang];  
+  if (langInfo !== undefined) {
+    title += langInfo.title[0];
+    title += ' ';
+  }
+  
+  if (track !== undefined) {
+    if (track.Format_Commercial_IfAny !== undefined) {
+      if (track.Format_Commercial_IfAny.toLowerCase().includes('dolby atmos')) {    
+        title += 'Dolby Atmos';
+      }
+      else
+        title += track.Format_Commercial_IfAny;
+    }
+    else if (track.Format !== undefined) {
+      title += track.Format;
+    }
+  }
+  else 
+    title += stream.codec_name;
+
+  return title;
 }
 
 function plugin(file, librarySettings, inputs) {
@@ -769,6 +797,7 @@ function plugin(file, librarySettings, inputs) {
     audioMapDel = {};
   }
   // select audio
+  let lastAudioTitle = '';
   for (lang in audioMap) {
     let audioArray = audioMap[lang];
     audioArray.sort(function(a, b) {
@@ -814,26 +843,38 @@ function plugin(file, librarySettings, inputs) {
         needModifyAudio = true;         
       }
       if (needModifyAudio)
-        acodec += ` -disposition:${outputStreamIndex} ${defaultFlag}`;
-      
+        acodec += ` -disposition:${outputStreamIndex} ${defaultFlag}`;      
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} ${acodec}`;
+
       if (title !== undefined) {
-        title = title.split('"').join('');
-        if (track !== undefined && track.Format_Commercial_IfAny !== undefined && track.Format_Commercial_IfAny.includes('Dolby Atmos')) {
-          // mark dolby atmos
-          if (!title.toLowerCase().includes('dolby atmos')) {    
-            title += ' Dolby Atmos';
-            needModifyAudio = true;         
+        if (title.length > 30 || title === lastAudioTitle) {
+          lastAudioTitle = title;
+          title = reconstructAudioTitle(lang, stream, track);
+          needModifyAudio = true;         
+        }
+        else {
+          lastAudioTitle = title;
+          let newtitle = title.split('"').join('');
+          if (track !== undefined && track.Format_Commercial_IfAny !== undefined 
+              && track.Format_Commercial_IfAny.includes('Dolby Atmos')) {
+            // mark dolby atmos
+            if (!newtitle.toLowerCase().includes('dolby atmos')) {    
+              newtitle += ' Dolby Atmos';        
+            }
           }
+          if (title !== newtitle)
+              needModifyAudio = true; 
+          title = newtitle;
         }
       }
-      else if (track !== undefined) {
-        title = track.Format_Commercial_IfAny;
-        if (title !== undefined)
-          needModifyAudio = true;         
+      else {
+        // reconstruct title
+        title = reconstructAudioTitle(lang, stream, track);
+        needModifyAudio = true; 
       }
-      if (title !== undefined)
+      if (title !== undefined) {        
         extraArguments += ` -metadata:s:${outputStreamIndex} title="${title}"`; // s: for stream       
+      }
       if (LangMap.hasOwnProperty(lang)) {
         ffmpegLang = LangMap[lang].ffmpeg;
         extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`; // s: for stream
