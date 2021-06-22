@@ -949,7 +949,8 @@ function plugin(file, librarySettings, inputs) {
     maxFrameBitrate = parseInt(maxFrameBitrate);
     // randomize queue size to work around tdarr "same argument as last time" bug ?
     let queueSize = 9999;// + Math.floor(Math.random() * 10000);
-    response.preset += `, -movflags use_metadata_tags ${extraArguments} -max_muxing_queue_size ${queueSize}`;
+    // worker1.js splits at '<io>'' or ',' to put command before and after ffmpeg '-i' switch, becuase we use ',' in hdr param, use '<io>' as the splitter
+    response.preset += `<io> -movflags use_metadata_tags ${extraArguments} -max_muxing_queue_size ${queueSize}`;
     response.processFile = true;
   }
   return response;
