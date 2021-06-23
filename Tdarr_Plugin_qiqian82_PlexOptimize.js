@@ -3,13 +3,13 @@ function details() {
   return {
     id: 'Tdarr_Plugin_qiqian82_PlexOptimize',
     Stage: 'Pre-processing',
-    Name: 'My Plex Optimize',
+    Name: 'My Emby Optimizer',
     Type: 'Video',
     Operation: 'Transcode',
     Description: `Be smart`,
     Version: '3.0',
     Link: 'https://github.com/HaveAGitGat/Tdarr_Plugins/blob/master/Community/Tdarr_Plugin_MC93_Migz1FFMPEG.js',
-    Tags: 'pre-processing,ffmpeg,video only,nvenc h265,configurable',
+    Tags: 'pre-processing,ffmpeg,video,audio,configurable',
     Inputs: [
     {
       name: 'audio_remove_except',
@@ -58,20 +58,20 @@ function findTrack(file, stream)
 
 function getTrackBitrate(stream, track)
 {
-  if (stream.bit_rate !== undefined) 
-    return parseInt(stream.bit_rate);
+  // if (stream.bit_rate !== undefined) 
+  //   return parseInt(stream.bit_rate);
   
   if (track === undefined)
-    return -1;
+    return -10;
 
-  if (track.BitRate !== undefined)
-    return parseInt(track.BitRate);
+  // if (track.BitRate !== undefined)
+  //   return parseInt(track.BitRate);
 
-  if (track.BitRate_Nominal !== undefined)
-    return parseInt(track.BitRate_Nominal); 
+  // if (track.BitRate_Nominal !== undefined)
+  //   return parseInt(track.BitRate_Nominal); 
     
   if (track.StreamSize === undefined)
-    return -1;
+    return -5;
 
   let duration = track.Duration;
   //if (duration === undefined)
@@ -467,8 +467,8 @@ function plugin(file, librarySettings, inputs) {
   response.infoLog += `file : ${JSON.stringify(file.file)}\n`;
   response.infoLog += `nfo : ${nfo}\n`;
   let originalLang = findOriginalLang(nfo, inputs.tmdb_api_key, response);
-  response.infoLog += `orignal language : ${originalLang}\n`;
-  response.infoLog += `cache: ${JSON.stringify(librarySettings.cache)}\n`;
+  response.infoLog += `original language : ${originalLang}\n`;
+  response.infoLog += `working-dir: ${process.cwd()} , cache: ${librarySettings.cache}\n`;
 
   // Check if file is a video. If it isn't then exit plugin.
   if (file.fileMedium !== 'video') {
@@ -505,10 +505,8 @@ function plugin(file, librarySettings, inputs) {
   let maxFrameBitrate = 0;
   let outputStreamIndex = 0;
 
-  let needModifyVideo = false;
-  let needModifyAudio = false;
-  let needModifySubtitle = false;
-  let needDiscardExtra = false;
+  let dirty = false;
+  let dirtyReason = 'Dirty streams : ';
   
   let audioMap = {};
   let audioMapDel = {};
@@ -545,10 +543,12 @@ function plugin(file, librarySettings, inputs) {
       // mjpeg/png are usually embedded pictures that can cause havoc with plugins.
       if (stream.codec_name === 'mjpeg' || stream.codec_name === 'png' || (hasValidVideoTrack && track === undefined) ) {
         response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] removed`);
+        dirty = true; dirtyReason += `${stream.index}-rm `;
         continue;
       }
       if (stream.width < bestVideoWidth) {
         response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] removed`);
+        dirty = true; dirtyReason += `${stream.index}-rm `;
         continue; 
       }
 
@@ -565,6 +565,8 @@ function plugin(file, librarySettings, inputs) {
       if (stream.width > 3840)
         targetBitrate = 115139; // 8k
 
+      targetBitrate *= 1000;
+
       // Check if video stream is HDR or 10bit
       let bitDepth = "8-bit";
       if (is10bit(stream, track)) {
@@ -574,31 +576,44 @@ function plugin(file, librarySettings, inputs) {
 
       // re-encode h265 if necessary
       let targetCRF = 22;
+      let keepHevc = false;
+      let bitrate = getTrackBitrate(stream, track);
       if (stream.codec_name === 'hevc' && track !== undefined) {
-        let keepHevc = false;
+        // re-encode to vbr
+        targetCRF = 20;
+        
         // skip if encoded in hevc crf mode
         if (track !== undefined && track.Encoded_Library_Settings !== undefined) {
           if (track.Encoded_Library_Settings.includes('/ rc=crf / crf='))
             keepHevc = true;
         }
         // keep stream if at reasonable bitrate 
-        let bitrate = getTrackBitrate(stream, track);
-        if (bitrate > 0 && bitrate <= targetBitrate * 1000) {
+        if (bitrate > 0 && bitrate <= targetBitrate) {
           keepHevc = true;
         }
         // keep hdr10+ && dolby vision
         if (track.HDR_Format_Compatibility !== undefined && track.HDR_Format_Compatibility !== "HDR10") {
           keepHevc = true;
         }
-
-        if (keepHevc) {
-          extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
-          response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] retain`);
-          outputStreamIndex++;
-          continue;
+      }
+      else if (bitrate > 0 && bitrate <= targetBitrate * 0.05) {
+        // really small stream, re-encode would make it bigger
+        keepHevc = true;
+      }
+      else if (bitrate < 0) {
+        // unkown bitrate, use file size as a guess
+        if (file.file_size !== undefined && track !== undefined && track.Duration !== undefined) {
+          bitrate = parseFloat(file.file_size) * 1024 * 1024 / parseFloat(track.Duration);
+          if (bitrate > 0 && bitrate <= targetBitrate * 0.05)
+            keepHevc = true;
         }
-        // re-encode to vbr
-        targetCRF = 20;
+      }
+
+      if (keepHevc) {
+        extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
+        response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] retain ${parseInt(bitrate/1000)}k/${parseInt(targetBitrate/1000)}k`);
+        outputStreamIndex++;
+        continue;
       }
 
       // hdr info
@@ -624,7 +639,7 @@ function plugin(file, librarySettings, inputs) {
       }
 
       // re-encode
-      needModifyVideo = true;
+      dirty = true; dirtyReason += `${stream.index}-hevc `;
       let maxVideoBitrate = parseInt(targetBitrate * 1.5);
       let vbvBuff = parseInt(targetBitrate * 2);
       maxFrameBitrate += vbvBuff;
@@ -633,7 +648,7 @@ function plugin(file, librarySettings, inputs) {
       if (bitDepth === "10-bit" || track.HDR_Format_Compatibility === "HDR10") {
         extraArguments += " -pix_fmt yuv420p10le";
       }
-      response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] x265 ${bitDepth}`);
+      response.infoLog += infoVideo(file, stream, `[${outputStreamIndex}] x265 ${bitDepth} ${parseInt(bitrate/1000)}k/${parseInt(targetBitrate/1000)}k`);
       outputStreamIndex++;
     }
   }
@@ -693,8 +708,9 @@ function plugin(file, librarySettings, inputs) {
 
         cacheAudio(file, stream, audioMap);
 
-        if (lang !== fixLang(lang, stream, track))
-          needModifyAudio = true;
+        if (lang !== fixLang(lang, stream, track)) {
+          dirty = true; dirtyReason += `${stream.index}-${lang} `;
+        }
       }
     }
   }
@@ -710,7 +726,7 @@ function plugin(file, librarySettings, inputs) {
       if (lang === "und") {
         lang = fixLang(lang, stream, track);
         if (lang !== "und")
-          needModifySubtitle = true;
+          dirty = true; dirtyReason += `${stream.index}-${lang} `;
       }
       // response.infoLog += ` ${lang} -> `;
       if (lang === "und" && track !== undefined
@@ -725,7 +741,7 @@ function plugin(file, librarySettings, inputs) {
         guessLangInfo = guessSubLang(sub);
         if (guessLangInfo !== undefined) {
           // either delete or update
-          needModifySubtitle = true;
+          dirty = true; dirtyReason += `${stream.index}-${lang} `;
           lang = guessLangInfo.lang;
         }
         // delete sub
@@ -736,7 +752,7 @@ function plugin(file, librarySettings, inputs) {
       // 只保留中英字幕
       if (LangMap.zh.alias.indexOf(lang) < 0 && LangMap.en.alias.indexOf(lang) < 0 && lang !== 'und') {
         // remove  
-        needModifySubtitle = true;
+        dirty = true; dirtyReason += `${stream.index}-rm `;
         response.infoLog += `Subtitle[${stream.index}], ${lang}, ${title}, ${stream.codec_name} -> removed \n`;
       }
       else {
@@ -767,7 +783,7 @@ function plugin(file, librarySettings, inputs) {
           if ((title === 'und' || title === undefined) && langInfo !== undefined)
             title = langInfo.title[0];
           if (title !== 'und' && title !== undefined) {
-            needModifySubtitle = true;
+            dirty = true; dirtyReason += `${stream.index}-${title} `;
             extraArguments += ` -metadata:s:${outputStreamIndex} title="${title}"`; // s: for stream
           }
         }
@@ -787,7 +803,7 @@ function plugin(file, librarySettings, inputs) {
       // outputStreamIndex++;
       // mkv only supports audio/video/subtitle
       response.infoLog += `Stream[${stream.index}], ${title}, ${stream.codec_name} -> removed\n`;      
-      needDiscardExtra = true;
+      dirty = true; dirtyReason += `${stream.index}-rm `;
     }
   }
 
@@ -828,7 +844,7 @@ function plugin(file, librarySettings, inputs) {
           if (Number(track.BitDepth) == 32)
             acodec = `pcm_s32le`;   
         }     
-        needModifyAudio = true;         
+        dirty = true; dirtyReason += `${stream.index}-pcm `;     
       }
       if ( stream.channels == 2 && 
           ( stream.codec_name !== "aac" || 
@@ -836,25 +852,24 @@ function plugin(file, librarySettings, inputs) {
             (stream.profile !== "LC" && stream.profile !== "HE-AAC" && stream.profile !== "HE-AACv2" && stream.profile !== "LD" && stream.profile !== "ELD") 
             ) ) {
         // stereo aac has best compatibility
-        let bitrate = getTrackBitrate(stream, track);        
+        // let bitrate = getTrackBitrate(stream, track);        
         
         let aacVbr = '5';
         acodec = `libfdk_aac -profile:${outputStreamIndex} aac_he_v2 -vbr:${outputStreamIndex} ${aacVbr}`;
-        needModifyAudio = true;         
+        dirty = true; dirtyReason += `${stream.index}-aac `;     
       }
-      if (needModifyAudio)
-        acodec += ` -disposition:${outputStreamIndex} ${defaultFlag}`;      
       extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} ${acodec}`;
 
       if (title !== undefined) {
+        title = title.split('"').join(''); // set title add "", strip before compare
         if (title.length > 30 || title === lastAudioTitle) {
           lastAudioTitle = title;
           title = reconstructAudioTitle(lang, stream, track);
-          needModifyAudio = true;         
+          dirty = true; dirtyReason += `${stream.index}-title-dummy `;
         }
         else {
           lastAudioTitle = title;
-          let newtitle = title.split('"').join('');
+          let newtitle = title;
           if (track !== undefined && track.Format_Commercial_IfAny !== undefined 
               && track.Format_Commercial_IfAny.includes('Dolby Atmos')) {
             // mark dolby atmos
@@ -862,15 +877,16 @@ function plugin(file, librarySettings, inputs) {
               newtitle += ' Dolby Atmos';        
             }
           }
-          if (title !== newtitle)
-              needModifyAudio = true; 
+          if (title !== newtitle) {
+              dirty = true; dirtyReason += `${stream.index}-title-old-${title}-new-${newtitle} `;
+          }
           title = newtitle;
         }
       }
       else {
         // reconstruct title
         title = reconstructAudioTitle(lang, stream, track);
-        needModifyAudio = true; 
+        dirty = true; dirtyReason += `${stream.index}-title-reconstruct `;
       }
       if (title !== undefined) {        
         extraArguments += ` -metadata:s:${outputStreamIndex} title="${title}"`; // s: for stream       
@@ -896,7 +912,7 @@ function plugin(file, librarySettings, inputs) {
           for (i++; i < audioArray.length; i++) {
             stream = audioArray[i];
             response.infoLog += infoAudio(file, stream, 'removed');
-            needModifyAudio = true;
+            dirty = true; dirtyReason += `${stream.index}-rm `;
           }
           break;
         }
@@ -908,7 +924,7 @@ function plugin(file, librarySettings, inputs) {
     for (let i = 0; i < audioArray.length; i++) {
       let stream = audioArray[i];
       response.infoLog += infoAudio(file, stream, 'removed');
-      needModifyAudio = true;
+      dirty = true; dirtyReason += `${stream.index}-rm `;
     }
   }
 
@@ -926,7 +942,7 @@ function plugin(file, librarySettings, inputs) {
     if (defaultSub !== undefined) {  
       extraArguments += ` -disposition:${defaultSub.outputStreamIndex} default`;
       response.infoLog += `Subtitle default -> [${defaultSub.stream.index}]\n`;
-      needModifySubtitle = true;
+      dirty = true; dirtyReason += `${defaultSub.stream.index}-default `;
     }
   }
   else {
@@ -935,24 +951,32 @@ function plugin(file, librarySettings, inputs) {
       let newSelection = subStreams.zh[0];
       extraArguments += ` -disposition:${defaultSub.outputStreamIndex} 0 -disposition:${newSelection.outputStreamIndex} default`;
       response.infoLog += `Subtitle default [${defaultSub.stream.index}] -> [${newSelection.stream.index}]\n`;
-      needModifySubtitle = true;
+      dirty = true; dirtyReason += `${defaultSub.stream.index}-default `;
     }
   }
 
-  if (!needModifyVideo && !needModifyAudio && !needModifySubtitle && !needDiscardExtra && response.container === file.container ) {
+  if (!dirty && response.container === file.container ) {
     response.processFile = false;
     response.infoLog += `File doesn't need optimize \n`;
     return response;
   }
+  else if (!dirty) {
+    // remux
+    response.infoLog += `Remux to ${response.container}\n`;
+    response.preset += `<io> -movflags use_metadata_tags -vcodec copy -acodec copy -scodec copy`;
+    response.processFile = true;
+  }
   else {
-    maxFrameBitrate *= 2;
-    maxFrameBitrate = parseInt(maxFrameBitrate);
+    response.infoLog += dirtyReason + '\n';
     // randomize queue size to work around tdarr "same argument as last time" bug ?
-    let queueSize = 9999;// + Math.floor(Math.random() * 10000);
+    let queueSize = 8999 + Math.floor(Math.random() * 1000);
     // worker1.js splits at '<io>'' or ',' to put command before and after ffmpeg '-i' switch, becuase we use ',' in hdr param, use '<io>' as the splitter
     response.preset += `<io> -movflags use_metadata_tags ${extraArguments} -max_muxing_queue_size ${queueSize}`;
     response.processFile = true;
   }
+
+  response.reQueueAfter = false;
+  response.removeFromDB = true;
   return response;
 }
 module.exports.details = details;
