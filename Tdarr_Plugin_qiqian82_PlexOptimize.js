@@ -875,7 +875,7 @@ function plugin(file, librarySettings, inputs) {
           if (track !== undefined && track.Format_Commercial_IfAny !== undefined 
               && track.Format_Commercial_IfAny.includes('Dolby Atmos')) {
             // mark dolby atmos
-            if (!newtitle.toLowerCase().includes('dolby atmos')) {    
+            if (!newtitle.toLowerCase().includes('atmos')) {    
               newtitle += ' Dolby Atmos';        
             }
           }
