@@ -461,9 +461,10 @@ function plugin(file, librarySettings, inputs) {
     infoLog: '',
   };
   
-  var os = require("os")
-  const nfo = file.file.split('.').slice(0, -1).join('.') + ".nfo";
-  response.infoLog += `${os.hostname()} ram : ${os.totalmem()}\n`;
+  var os = require("os");
+  const ram = parseInt(os.totalmem() / 1024 / 1024);
+  response.infoLog += `${os.hostname()} , sys : ${process.platform} , ram : ${ram}MB\n`;
+  const nfo = file.file.split('.').slice(0, -1).join('.') + ".nfo";  
   response.infoLog += `file : ${JSON.stringify(file.file)}\n`;
   response.infoLog += `nfo : ${nfo}\n`;
   let originalLang = findOriginalLang(nfo, inputs.tmdb_api_key, response);
