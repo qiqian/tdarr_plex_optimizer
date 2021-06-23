@@ -379,7 +379,6 @@ function findOriginalLang(nfoFile, apiKey, response)
     }    
   }
   else {
-    response.infoLog += ` tv\n`;
     // find show id
     let show_id = null;
     if (tmdbid != null) {
@@ -407,6 +406,8 @@ function findOriginalLang(nfoFile, apiKey, response)
       }
     }
     if (show_id != null) {
+      response.infoLog += `tv ${show_id}\n`;
+
       // find show info
       const req = `curl --silent -L "https://api.themoviedb.org/3/tv/${show_id}?api_key=${apiKey}&language=en-US"`;
       let showInfo = require("child_process").execSync(req);
@@ -418,6 +419,9 @@ function findOriginalLang(nfoFile, apiKey, response)
         else 
           return normalizeLang(showInfo.original_language);
       }
+    }
+    else {
+      response.infoLog += `tv tmdbid=${tmdbid} tvdbid=${tvdbid} show id not found\n`;
     }
   }
   return "und";
