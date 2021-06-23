@@ -567,6 +567,7 @@ function plugin(file, librarySettings, inputs) {
         targetBitrate = 115139; // 8k
 
       targetBitrate *= 1000;
+      targetBitrate *= 0.05; // ratio calculated by file size per hour
 
       // Check if video stream is HDR or 10bit
       let bitDepth = "8-bit";
@@ -597,7 +598,7 @@ function plugin(file, librarySettings, inputs) {
           keepHevc = true;
         }
       }
-      else if (bitrate > 0 && bitrate <= targetBitrate * 0.05) {
+      else if (bitrate > 0 && bitrate <= targetBitrate) {
         // really small stream, re-encode would make it bigger
         keepHevc = true;
       }
@@ -605,7 +606,7 @@ function plugin(file, librarySettings, inputs) {
         // unkown bitrate, use file size as a guess
         if (file.file_size !== undefined && track !== undefined && track.Duration !== undefined) {
           bitrate = parseFloat(file.file_size) * 1024 * 1024 / parseFloat(track.Duration);
-          if (bitrate > 0 && bitrate <= targetBitrate * 0.05)
+          if (bitrate > 0 && bitrate <= targetBitrate)
             keepHevc = true;
         }
       }
