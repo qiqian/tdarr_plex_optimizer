@@ -870,7 +870,11 @@ function plugin(file, librarySettings, inputs) {
         title = title.split('"').join(''); // set title add "", strip before compare
         if (title.length > 30 || title === lastAudioTitle) {
           lastAudioTitle = title;
-          title = reconstructAudioTitle(lang, stream, track);
+          let newtitle = reconstructAudioTitle(lang, stream, track);
+          if (title === newtitle) {
+            newtitle += ` (${stream.index})`;
+          }
+          title = newtitle;
           dirty = true; dirtyReason += `${stream.index}-title-dummy `;
         }
         else {
