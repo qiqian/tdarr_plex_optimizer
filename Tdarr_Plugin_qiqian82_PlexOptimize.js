@@ -540,6 +540,8 @@ function plugin(file, librarySettings, inputs) {
   let mediainfoResult = JSON.parse(mediainfoExit);
   if (mediainfoResult.media == null) {
     response.infoLog += `mediainfo failed :\n ${mediainfoExit}\n`;    
+    var os = require("os");
+    throw `${os.hostname()} : mediainfo failed, ${file.file}, exit:${mediainfoExit}`;
   }
   else {
     file.mediaInfo = mediainfoResult.media;
