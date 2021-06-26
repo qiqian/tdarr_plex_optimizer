@@ -44,14 +44,28 @@ function findTrack(file, stream)
 {
   for (let i = 0; i < file.mediaInfo.track.length; i++) {
     let track = file.mediaInfo.track[i];
-    if (track.StreamOrder === undefined && track.ID === undefined)
-      continue;
-    if (stream.index !== undefined && Number(track.StreamOrder) === stream.index)
-      return track;
-    if (stream.id !== undefined && Number(track.ID) === Number(stream.id))
-      return track;
-    if (Number(track.ID) === Number(stream.index) + 1)
-      return track;
+
+    if (track.StreamOrder !== undefined) {
+      if (Number(track.StreamOrder) === stream.index)
+        return track;
+      else 
+        continue;
+    }
+
+    if (track.ID !== undefined) {
+      
+      if (stream.id !== undefined) {
+        if (Number(track.ID) === Number(stream.id))
+          return track;
+        else
+          continue;
+      }
+
+      if (Number(track.ID) === Number(stream.index) + 1)
+        return track;
+      else
+        continue;
+    }
   }
   return undefined;
 }
