@@ -27,16 +27,8 @@ function details() {
     Tags: 'pre-processing,ffmpeg,video,audio,configurable',
     Inputs: [
     {
-      name: 'audio_remove_except',
-      tooltip: `Specify language to remove unless they are in the list. 
-               \\Leave empty to disable.
-               \\nExample:\\n
-               en,eng,jp,jap,jpn`,
-    },
-    {
-      name: 'audio_remove',
-      tooltip: `Specify language tag/s here for the audio tracks you'd like to remove. 
-               \\Leave empty to disable.
+      name: 'audio_keep',
+      tooltip: `Specify language to keep besides original language
                \\nExample:\\n
                en,eng,jp,jap,jpn`,
     },
@@ -234,7 +226,7 @@ function normalizeLang(lang)
   }
   return lang;
 }
-function cacheAudio(file, stream, audioMap)
+function cacheAudio(file, stream, audioMap, reason)
 {
   let track = findTrack(file, stream);
   let lang = getLang(stream, track);  
@@ -245,7 +237,7 @@ function cacheAudio(file, stream, audioMap)
   // if (audioMap[lang][stream.codec_name] == undefined)
     // audioMap[lang][stream.codec_name] = [];
   // record
-  audioMap[lang].push(stream);
+  audioMap[lang].push( { "stream" : stream, "reason" : reason } );
 }
 function infoAudio(file, stream, action)
 {
@@ -354,6 +346,7 @@ function extractNormalizedValue(v, norm)
 function findOriginalLang(nfoFile, apiKey, response) 
 {
   if (!require('fs').existsSync(nfoFile)) {
+    response.infoLog += `nfo not found\n`;
     return "und";
   }
 
@@ -542,7 +535,8 @@ function plugin(file, librarySettings, inputs) {
   response.infoLog += `original language : ${originalLang}\n`;
   response.infoLog += `working-dir: ${process.cwd()} , cache: ${librarySettings.cache}\n`;
 
-  const mediainfoExit = require("child_process").execSync(`LC_ALL=en_US.UTF-8 mediainfo -f --Output=JSON "${file.file}"`).toString();
+  const LC_ENV = (process.platform === 'win32') ? '' : 'LC_ALL=en_US.UTF-8';
+  const mediainfoExit = require("child_process").execSync(`${LC_ENV} mediainfo -f --Output=JSON "${file.file}"`).toString();
   let mediainfoResult = JSON.parse(mediainfoExit);
   if (mediainfoResult.media == null) {
     response.infoLog += `mediainfo failed :\n ${mediainfoExit}\n`;    
@@ -560,26 +554,20 @@ function plugin(file, librarySettings, inputs) {
 
   response.container = 'mkv';
 
-  let audio_remove_except = [];
-  let audio_remove = [];
+  let audio_keep = [];
   let audio_title_remove = [];
-  if (inputs !== undefined && inputs.audio_remove_except !== undefined) {
-    audio_remove_except = inputs.audio_remove_except.split(',');
-    fillLangAlias(audio_remove_except);
-    cleanupArray(audio_remove_except);
-  }
-  if (inputs !== undefined && inputs.audio_remove !== undefined) {
-    audio_remove = inputs.audio_remove.split(',');
-    fillLangAlias(audio_remove);
-    cleanupArray(audio_remove);
-  }
+  if (inputs !== undefined && inputs.audio_keep !== undefined) {
+    audio_keep = inputs.audio_keep.split(',');
+    fillLangAlias(audio_keep);
+    cleanupArray(audio_keep);
+  }  
   if (inputs !== undefined && inputs.audio_title_remove !== undefined) {
     audio_title_remove = inputs.audio_title_remove.split(',');
     cleanupArray(audio_title_remove);
   }
   response.infoLog += `Audio, `
-  + `keep (${audio_remove_except.length}) : ${audio_remove_except}, `
-  + `remove (${audio_remove.length + audio_title_remove.length}) : ${audio_remove} ${audio_title_remove}\n`;
+  + `keep (${audio_keep.length}) : ${audio_keep}, `
+  + `remove (${audio_title_remove.length}) : ${audio_title_remove}\n`;
 
   // Set up required variables.
   let extraArguments = '';
@@ -741,53 +729,43 @@ function plugin(file, librarySettings, inputs) {
     if (stream.codec_type.toLowerCase() === 'audio') {
       let lang = getLang(stream, track).toLowerCase();
       let removeAudio = false;
+      let reason = '';
 
       if (hasValidAudioTrack && track === undefined) {
+        reason = `notrack`;
         removeAudio = true;
       }
       else {
-      if (lang !== 'und') {
-        if (audio_remove_except.length > 0) {
-          if (!matchListAny(fixLang(lang, stream, track), audio_remove_except)) {
-            // response.infoLog += `Unkeep codec : ${audio_remove_except} : ${audio_remove_except.length} : ${lang}\n`;
+        if (lang !== 'und') {
+          if (originalLang === 'und') {
+            // original language not known, don't remove anything
+          }
+          else if (matchListAny(fixLang(lang, stream, track), audio_keep)) {
+           // user specified to keep  
+          }
+          else if (originalLang === lang) {
+            // always keep original lang
+          }
+          else {
+            reason = 'none-orig';
             removeAudio = true;
           }
         }
-        if (audio_remove.length > 0) {
-          if (matchListAny(fixLang(lang, stream, track), audio_remove)) {
-            // response.infoLog += `Remove codec : ${audio_remove} : ${audio_remove.length} : ${lang}\n`;
-            removeAudio = true;
+        if (title !== undefined) {
+          if (audio_title_remove.length > 0) {
+            if (includesListAny(title.toLowerCase(), audio_title_remove)) {
+              reason = 'title';
+              removeAudio = true;
+            }
           }
         }
-        // remove non-orig audio if user not specified to keep
-        if (originalLang !== 'und' && lang !== originalLang) {
-          if (!matchListAny(fixLang(lang, stream, track), audio_remove_except)) {
-            // response.infoLog += `Unkeep codec : ${audio_remove_except} : ${audio_remove_except.length} : ${lang}\n`;
-            removeAudio = true;
-          }  
-        }
-      }
-      if (title !== undefined) {
-        if (audio_title_remove.length > 0) {
-          if (includesListAny(title.toLowerCase(), audio_title_remove)) {
-            // response.infoLog += `Remove title : ${audio_title_remove} : ${audio_title_remove.length} : ${lang}\n`;
-            removeAudio = true;
-          }
-        }
-      }
       }
       
       if (removeAudio) {
         // skip
-        // response.infoLog += infoAudio(file, stream, 'removed');
-
-        cacheAudio(file, stream, audioMapDel);
+        cacheAudio(file, stream, audioMapDel, reason);
       }
       else {
-        // extraArguments += ` -map 0:${stream.index} -c:${outputStreamIndex} copy`;
-        // response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] copy`);
-        // outputStreamIndex++;
-
         cacheAudio(file, stream, audioMap);
 
         if (lang !== fixLang(lang, stream, track)) {
@@ -899,20 +877,52 @@ function plugin(file, librarySettings, inputs) {
   for (lang in audioMap) {
     let audioArray = audioMap[lang];
     audioArray.sort(function(a, b) {
-      if (a.channels > b.channels)
+      if (a.stream.channels > b.stream.channels)
         return -1;
-      if (a.channels < b.channels)
+      if (a.stream.channels < b.stream.channels)
         return 1;
-      return a.index - b.index;
+      return a.stream.index - b.stream.index;
     });
-    // copy until default
+
+    let audioConfig = {};
+    audioConfig.defaultSaved = false;
+    audioConfig.freeMaxChannel = -1;
+
     for (let i = 0; i < audioArray.length; i++) {
-      let stream = audioArray[i];
+      let stream = audioArray[i].stream;
       let track = findTrack(file, stream);
       let title = findTitle(stream, track);
       let defaultFlag = 0;
       if (stream.disposition !== undefined && stream.disposition.default === 1)
         defaultFlag = 1;
+
+      // skip ?
+      if (lang !== 'und' && audioConfig.defaultSaved) {
+        let keepThis = false;
+        if (stream.channels > 2 && track !== undefined) {
+          // keep commercial streams
+          if (track.Format_Commercial_IfAny !== undefined && track.Format_Commercial_IfAny.includes('Dolby Atmos'))
+            keepThis = true;
+          if (track.Format_Commercial_IfAny !== undefined && track.Format_Commercial_IfAny.includes('Master Audio'))
+            keepThis = true;
+          if (track.Format_Settings !== undefined &&  track.Format_Settings.includes('Surround EX'))
+            keepThis = true;
+        }
+        // common audio
+        if (!keepThis && stream.channels > audioConfig.freeMaxChannel) {
+          keepThis = true;
+          audioConfig.freeMaxChannel = stream.channels;
+        }
+
+        if (!keepThis) {
+          response.infoLog += infoAudio(file, stream, `removed channels=${stream.channels}`);
+          dirty = true; dirtyReason += `${stream.index}-rm `;
+          continue;
+        }
+      }
+      // save the stream
+      if (defaultFlag)
+        audioConfig.defaultSaved = true;
 
       let acodec = 'copy';
       if (stream.codec_name === "pcm_bluray") {
@@ -992,33 +1002,15 @@ function plugin(file, librarySettings, inputs) {
       }
 
       response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec} ${title}`);
-      outputStreamIndex++;
-      if (lang !== 'und') {
-        let skipOther = false;
-        if (defaultFlag === 1) {
-          if (track !== undefined) {
-            if (track.Format_Commercial_IfAny === undefined)
-              skipOther = true;
-            else if (!track.Format_Commercial_IfAny.includes('Dolby Atmos'))
-              skipOther = true;
-          }
-        }
-        if (skipOther) {
-          for (i++; i < audioArray.length; i++) {
-            stream = audioArray[i];
-            response.infoLog += infoAudio(file, stream, 'removed');
-            dirty = true; dirtyReason += `${stream.index}-rm `;
-          }
-          break;
-        }
-      }
-    }
+      outputStreamIndex++;   
+    }   
   }
   for (lang in audioMapDel) {
     let audioArray = audioMapDel[lang];
     for (let i = 0; i < audioArray.length; i++) {
-      let stream = audioArray[i];
-      response.infoLog += infoAudio(file, stream, 'removed');
+      let stream = audioArray[i].stream;
+      let reason = audioArray[i].reason;
+      response.infoLog += infoAudio(file, stream, `removed by ${reason}`);
       dirty = true; dirtyReason += `${stream.index}-rm `;
     }
   }
