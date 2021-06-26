@@ -1,12 +1,27 @@
 /* eslint no-plusplus: ["error", { "allowForLoopAfterthoughts": true }] */
 function details() {
+  var os = require("os");
+  let ram = parseInt(os.totalmem() / 1024 / 1024);
+  if (ram >= 1024) {
+    ram = Math.round((ram / 1024.) * 100) / 100.;
+    ram = `${ram}GB`;
+  }
+  else {
+    ram = `${ram}MB`;
+  }
+
+  let mediainfoVer = require("child_process").execSync(`mediainfo --version`).toString();
+  mediainfoVer = mediainfoVer.replace("MediaInfo Command line,", "").replace("MediaInfoLib - ", "").replace("\n", "").replace("\r", "").trim();
+
+  let name = `${os.hostname()}, ${process.platform}, ${ram}, mediainfo:${mediainfoVer}`;
+
   return {
     id: 'Tdarr_Plugin_qiqian82_PlexOptimize',
     Stage: 'Pre-processing',
-    Name: 'My Emby Optimizer',
+    Name: name,
     Type: 'Video',
     Operation: 'Transcode',
-    Description: `Be smart`,
+    Description: `Smart emby collection optimizer`,
     Version: '3.0',
     Link: 'https://github.com/HaveAGitGat/Tdarr_Plugins/blob/master/Community/Tdarr_Plugin_MC93_Migz1FFMPEG.js',
     Tags: 'pre-processing,ffmpeg,video,audio,configurable',
@@ -441,7 +456,7 @@ function findOriginalLang(nfoFile, apiKey, response)
   return "und";
 }
 
-function reconstructAudioTitle(lang, stream, track)
+function reconstructAudioTitle(lang, stream, track, ver)
 {
   let title = '';
 
@@ -451,20 +466,57 @@ function reconstructAudioTitle(lang, stream, track)
     title += ' ';
   }
   
-  if (track !== undefined) {
-    if (track.Format_Commercial_IfAny !== undefined) {
-      if (track.Format_Commercial_IfAny.toLowerCase().includes('dolby atmos')) {    
-        title += 'Dolby Atmos';
-      }
-      else
-        title += track.Format_Commercial_IfAny;
+  if (ver == 1) {
+    if (track !== undefined) {
+      if (track.Format_Commercial_IfAny !== undefined) {
+          if (track.Format_Commercial_IfAny.toLowerCase().includes('dolby atmos')) {    
+            title += 'Dolby Atmos';
+          }
+          else
+            title += track.Format_Commercial_IfAny;
+        }
+        else if (track.Format !== undefined) {
+          title += track.Format;
+        }
     }
-    else if (track.Format !== undefined) {
-      title += track.Format;
-    }
+    else 
+      title += stream.codec_name;
   }
-  else 
-    title += stream.codec_name;
+
+  if (ver == 2) {
+    if (track !== undefined) {
+      if (track.Format_Commercial_IfAny !== undefined) {
+          if (track.Format_Commercial_IfAny.toLowerCase().includes('dolby atmos')) {    
+            title += 'Dolby Atmos';
+          }
+          else
+            title += track.Format_Commercial_IfAny;
+        }
+        else if (track.Format !== undefined) {
+          title += track.Format;
+        }
+    }
+    else 
+      title += stream.codec_name;
+    title += ` ({stream.index})`;
+  }
+
+  if (ver == 3) {
+    if (track !== undefined) {
+      if (track.Format_Settings !== undefined) {
+        title += track.Format_Settings;
+      }
+      else if (track.Format_Commercial_IfAny !== undefined) {
+        title += track.Format_Commercial_IfAny;
+      }
+      else if (track.Format !== undefined) {
+        title += track.Format;
+      }
+    }
+    else 
+      title += stream.codec_name;
+    title += ` (${stream.index})`;
+  }
 
   return title;
 }
@@ -479,15 +531,25 @@ function plugin(file, librarySettings, inputs) {
     infoLog: '',
   };
   
-  var os = require("os");
-  const ram = parseInt(os.totalmem() / 1024 / 1024);
-  response.infoLog += `${os.hostname()} , sys : ${process.platform} , ram : ${ram}MB\n`;
+  //var os = require("os");
+  //const ram = parseInt(os.totalmem() / 1024 / 1024);
+  //response.infoLog += `${os.hostname()} , sys : ${process.platform} , ram : ${ram}MB\n`;
+
   const nfo = file.file.split('.').slice(0, -1).join('.') + ".nfo";  
-  response.infoLog += `file : ${JSON.stringify(file.file)}\n`;
+  response.infoLog += `file : ${file.file}\n`;
   response.infoLog += `nfo : ${nfo}\n`;
   let originalLang = findOriginalLang(nfo, inputs.tmdb_api_key, response);
   response.infoLog += `original language : ${originalLang}\n`;
   response.infoLog += `working-dir: ${process.cwd()} , cache: ${librarySettings.cache}\n`;
+
+  const mediainfoExit = require("child_process").execSync(`LC_ALL=en_US.UTF-8 mediainfo -f --Output=JSON "${file.file}"`).toString();
+  let mediainfoResult = JSON.parse(mediainfoExit);
+  if (mediainfoResult.media == null) {
+    response.infoLog += `mediainfo failed :\n ${mediainfoExit}\n`;    
+  }
+  else {
+    file.mediaInfo = mediainfoResult.media;
+  }
 
   // Check if file is a video. If it isn't then exit plugin.
   if (file.fileMedium !== 'video') {
@@ -882,16 +944,18 @@ function plugin(file, librarySettings, inputs) {
 
       if (title !== undefined) {
         title = title.split('"').join(''); // set title add "", strip before compare
-        if (title.length > 30 || title === lastAudioTitle) {
+        if (title.length > 30 || title === lastAudioTitle ||
+             title == reconstructAudioTitle(lang, stream, track, 1) ||
+             title == reconstructAudioTitle(lang, stream, track, 2)) {
           lastAudioTitle = title;
-          let newtitle = reconstructAudioTitle(lang, stream, track);
-          if (title === newtitle) {
-            newtitle += ` (${stream.index})`;
+          let newtitle = reconstructAudioTitle(lang, stream, track, 3);
+          if (title !== newtitle) {
+            dirty = true; dirtyReason += `${stream.index}-title-dummy `;
           }
           title = newtitle;
-          dirty = true; dirtyReason += `${stream.index}-title-dummy `;
         }
         else {
+          // keep original title
           lastAudioTitle = title;
           let newtitle = title;
           if (track !== undefined && track.Format_Commercial_IfAny !== undefined 
@@ -901,6 +965,13 @@ function plugin(file, librarySettings, inputs) {
               newtitle += ' Dolby Atmos';        
             }
           }
+          if (track !== undefined && track.Format_Settings !== undefined 
+              && track.Format_Settings.includes('Surround EX')) {
+            // mark dolby atmos
+            if (!newtitle.toLowerCase().includes('surround ex')) {    
+              newtitle += ' Surround EX';        
+            }
+          }          
           if (title !== newtitle) {
               dirty = true; dirtyReason += `${stream.index}-title-old-${title}-new-${newtitle} `;
           }
@@ -909,7 +980,7 @@ function plugin(file, librarySettings, inputs) {
       }
       else {
         // reconstruct title
-        title = reconstructAudioTitle(lang, stream, track);
+        title = reconstructAudioTitle(lang, stream, track, 3);
         dirty = true; dirtyReason += `${stream.index}-title-reconstruct `;
       }
       if (title !== undefined) {        
@@ -920,7 +991,7 @@ function plugin(file, librarySettings, inputs) {
         extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`; // s: for stream
       }
 
-      response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec}`);
+      response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec} ${title}`);
       outputStreamIndex++;
       if (lang !== 'und') {
         let skipOther = false;
@@ -1000,7 +1071,6 @@ function plugin(file, librarySettings, inputs) {
   }
 
   response.reQueueAfter = false;
-  response.removeFromDB = true;
   return response;
 }
 module.exports.details = details;
