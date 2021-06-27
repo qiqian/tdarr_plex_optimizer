@@ -887,7 +887,7 @@ function plugin(file, librarySettings, inputs) {
     });
 
     let audioConfig = {};
-    audioConfig.defaultSaved = false;
+    // audioConfig.defaultSaved = false;
     audioConfig.freeMaxChannel = -1;
 
     for (let i = 0; i < audioArray.length; i++) {
@@ -898,8 +898,13 @@ function plugin(file, librarySettings, inputs) {
       if (stream.disposition !== undefined && stream.disposition.default === 1)
         defaultFlag = 1;
 
+      let reason = '';
+
       // skip ?
-      if (lang !== 'und' && audioConfig.defaultSaved) {
+      if (lang === 'und') {
+        reason = 'keepUnknownLang';
+      } 
+      else {
         let keepThis = false;
         if (stream.channels > 2 && track !== undefined) {
           // keep commercial streams
@@ -907,13 +912,26 @@ function plugin(file, librarySettings, inputs) {
             keepThis = true;
           if (track.Format_Commercial_IfAny !== undefined && track.Format_Commercial_IfAny.includes('Master Audio'))
             keepThis = true;
+          if (track.Format_Commercial_IfAny !== undefined && track.Format_Commercial_IfAny.includes('Dolby Digital Plus'))
+            keepThis = true;
           if (track.Format_Settings !== undefined &&  track.Format_Settings.includes('Surround EX'))
             keepThis = true;
+          if (keepThis) {
+            reason = 'keepCommercial';
+          }
+        }
+        // save default stream
+        if (!keepThis && defaultFlag) {
+          keepThis = true;
+          reason = 'keepDefault';
+          if (stream.channels > audioConfig.freeMaxChannel)          
+            audioConfig.freeMaxChannel = stream.channels;
         }
         // common audio
         if (!keepThis && stream.channels > audioConfig.freeMaxChannel) {
           keepThis = true;
           audioConfig.freeMaxChannel = stream.channels;
+          reason = `maxChannel-${stream.channels}`;
         }
 
         if (!keepThis) {
@@ -921,10 +939,7 @@ function plugin(file, librarySettings, inputs) {
           dirty = true; dirtyReason += `${stream.index}-rm `;
           continue;
         }
-      }
-      // save the stream
-      if (defaultFlag)
-        audioConfig.defaultSaved = true;
+      }          
 
       let acodec = 'copy';
       if (stream.codec_name === "pcm_bluray") {
@@ -1003,7 +1018,7 @@ function plugin(file, librarySettings, inputs) {
         extraArguments += ` -metadata:s:${outputStreamIndex} language=${ffmpegLang}`; // s: for stream
       }
 
-      response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec} ${title}`);
+      response.infoLog += infoAudio(file, stream, `[${outputStreamIndex}] ${acodec} ${title} ${reason}`);
       outputStreamIndex++;   
     }   
   }
